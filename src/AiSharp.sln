@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35828.75
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrainAiModel", "TrainAiModel\TrainAiModel.csproj", "{98829C3E-DB89-456E-9E3F-E7D25DE2A8E4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RunAiModel", "RunAiModel\RunAiModel.csproj", "{87FC9E81-E58F-4AB6-835B-7DB39AAC9176}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOps", "AiOps\AiOps.csproj", "{C2E7F256-EAC8-4FB7-9862-F7A859953E32}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{98829C3E-DB89-456E-9E3F-E7D25DE2A8E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98829C3E-DB89-456E-9E3F-E7D25DE2A8E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98829C3E-DB89-456E-9E3F-E7D25DE2A8E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98829C3E-DB89-456E-9E3F-E7D25DE2A8E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{87FC9E81-E58F-4AB6-835B-7DB39AAC9176}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{87FC9E81-E58F-4AB6-835B-7DB39AAC9176}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{87FC9E81-E58F-4AB6-835B-7DB39AAC9176}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{87FC9E81-E58F-4AB6-835B-7DB39AAC9176}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6C7CF7A6-9F53-4697-A52C-650E1CB531C9}
+	EndGlobalSection
+EndGlobal
