@@ -30,10 +30,3 @@ You can set some parameters in the GUI
 
 The RunAiModel application is just for testing purposes.
 
-## ToDos
-
-- Refactor model to sequential
-- More loss functions
-- DataAugmentations
-- Calculate batch size by estimating memory requirement
-- Add BFloat16 as soon as .NET 9 is out
