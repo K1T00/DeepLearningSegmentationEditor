@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35828.75
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Ai", "AiOps\AnnotationTool.Ai.csproj", "{C2E7F256-EAC8-4FB7-9862-F7A859953E32}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Core", "AnnotationTool.Core\AnnotationTool.Core.csproj", "{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.App", "AnnotationTool.App\AnnotationTool.App.csproj", "{29DB60B1-F661-4047-A251-6E3B9E633CBB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2E7F256-EAC8-4FB7-9862-F7A859953E32}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29DB60B1-F661-4047-A251-6E3B9E633CBB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29DB60B1-F661-4047-A251-6E3B9E633CBB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29DB60B1-F661-4047-A251-6E3B9E633CBB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29DB60B1-F661-4047-A251-6E3B9E633CBB}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6C7CF7A6-9F53-4697-A52C-650E1CB531C9}
+	EndGlobalSection
+EndGlobal
