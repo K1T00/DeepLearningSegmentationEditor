@@ -14,6 +14,8 @@ A number of enhancements are planned – see **TODO / Roadmap** at the bottom.
 
 This repository includes a **ready-to-use sample project** so you can immediately try out the workflow.
 
+<img width="1725" height="829" alt="GUI_DeepLearningEditor" src="https://github.com/user-attachments/assets/0c9abfa0-e99e-4180-8321-02806c8a43cb" />
+
 ---
 
 ## Key Features
