@@ -310,7 +310,7 @@ namespace AnnotationTool.App
             btnTrain.FlatStyle = FlatStyle.Flat;
             btnTrain.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             btnTrain.ForeColor = Color.Black;
-            btnTrain.Location = new Point(667, 16);
+            btnTrain.Location = new Point(501, 16);
             btnTrain.Margin = new Padding(4);
             btnTrain.Name = "btnTrain";
             btnTrain.Size = new Size(129, 50);
@@ -325,7 +325,7 @@ namespace AnnotationTool.App
             btnAnnotate.FlatStyle = FlatStyle.Flat;
             btnAnnotate.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             btnAnnotate.ForeColor = Color.Black;
-            btnAnnotate.Location = new Point(446, 16);
+            btnAnnotate.Location = new Point(280, 16);
             btnAnnotate.Margin = new Padding(4);
             btnAnnotate.Name = "btnAnnotate";
             btnAnnotate.Size = new Size(129, 50);
@@ -340,7 +340,7 @@ namespace AnnotationTool.App
             btnTrainingResults.FlatStyle = FlatStyle.Flat;
             btnTrainingResults.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             btnTrainingResults.ForeColor = Color.Black;
-            btnTrainingResults.Location = new Point(888, 16);
+            btnTrainingResults.Location = new Point(722, 16);
             btnTrainingResults.Margin = new Padding(4);
             btnTrainingResults.Name = "btnTrainingResults";
             btnTrainingResults.Size = new Size(129, 50);
@@ -352,7 +352,7 @@ namespace AnnotationTool.App
             // pictureBox2
             // 
             pictureBox2.Image = Properties.Resources.arrow_black;
-            pictureBox2.Location = new Point(804, 24);
+            pictureBox2.Location = new Point(638, 24);
             pictureBox2.Margin = new Padding(4);
             pictureBox2.Name = "pictureBox2";
             pictureBox2.Size = new Size(76, 35);
@@ -448,7 +448,7 @@ namespace AnnotationTool.App
             // pictureBox3
             // 
             pictureBox3.Image = Properties.Resources.arrow_black;
-            pictureBox3.Location = new Point(583, 24);
+            pictureBox3.Location = new Point(417, 24);
             pictureBox3.Margin = new Padding(4);
             pictureBox3.Name = "pictureBox3";
             pictureBox3.Size = new Size(76, 35);
