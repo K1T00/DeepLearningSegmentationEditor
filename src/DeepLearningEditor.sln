@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35828.75
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Ai", "AiOps\AnnotationTool.Ai.csproj", "{C2E7F256-EAC8-4FB7-9862-F7A859953E32}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Ai", "AnnotationTool.Ai\AnnotationTool.Ai.csproj", "{C2E7F256-EAC8-4FB7-9862-F7A859953E32}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Core", "AnnotationTool.Core\AnnotationTool.Core.csproj", "{AA0E559C-4C3E-45E9-AD21-8CB1468E03E1}"
 EndProject
