@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AiOps\AiOps.csproj" />
+    <ProjectReference Include="..\AiOps\AnnotationTool.Ai.csproj" />
   </ItemGroup>
 
 </Project>
