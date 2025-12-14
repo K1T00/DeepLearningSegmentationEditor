@@ -9,6 +9,8 @@ It provides a simple workflow for generating pixel-level annotations, training s
 The current version focuses on **binary segmentation**. 
 A number of enhancements are planned – see **TODO / Roadmap** at the bottom.
 
+### ⚠️⚠️⚠️ IMPORTANT 
+Calling native cuda function empty_cache() works only with TorchSharp v0.105.1 atm (since dll is build from libtorch 2.5.1.0 and cuda 12.1 )
 
 ### 📦 Included Sample Project
 
