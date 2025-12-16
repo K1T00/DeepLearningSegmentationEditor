@@ -9,12 +9,15 @@ It provides a simple workflow for generating pixel-level annotations, training s
 The current version focuses on **binary segmentation**. 
 A number of enhancements are planned – see **TODO / Roadmap** at the bottom.
 
+### ⚠️⚠️⚠️ IMPORTANT 
+Calling native cuda function empty_cache() works only with TorchSharp v0.105.1 atm (since dll is build from libtorch 2.5.1.0 and cuda 12.1 )
 
 ### 📦 Included Sample Project
 
 This repository includes a **ready-to-use sample project** so you can immediately try out the workflow.
 
-<img width="1725" height="829" alt="GUI_DeepLearningEditor" src="https://github.com/user-attachments/assets/0c9abfa0-e99e-4180-8321-02806c8a43cb" />
+<img width="1680" height="871" alt="GUI_DeepLearningEditor" src="https://github.com/user-attachments/assets/d14575a3-f028-4e6a-b562-b1655af156ed" />
+
 
 ---
 
