@@ -9,6 +9,20 @@ CMakeLists.txt linguist-detectable=false
 Makefile linguist-detectable=false
 *.mak linguist-detectable=false
 
+# Hide native build files from GitHub language stats
+Makefile linguist-vendored
+**/Makefile linguist-vendored
+*.mak linguist-vendored
+
+CMakeLists.txt linguist-vendored
+*.cmake linguist-vendored
+
+*.cpp linguist-vendored
+*.c linguist-vendored
+*.h linguist-vendored
+*.hpp linguist-vendored
+
+
 ###############################################################################
 # Set default behavior to automatically normalize line endings.
 ###############################################################################
