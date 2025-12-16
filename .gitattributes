@@ -61,3 +61,14 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# Ignore native build files for GitHub language stats
+*.cpp linguist-detectable=false
+*.hpp linguist-detectable=false
+*.h linguist-detectable=false
+*.c linguist-detectable=false
+
+CMakeLists.txt linguist-detectable=false
+*.cmake linguist-detectable=false
+Makefile linguist-detectable=false
+*.mak linguist-detectable=false
