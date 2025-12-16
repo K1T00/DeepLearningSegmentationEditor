@@ -11,7 +11,6 @@ using System.Text.Json;
 using TorchSharp;
 using TorchSharp.Modules;
 using static AnnotationTool.Ai.Utils.AiUtils;
-using static AnnotationTool.Ai.Utils.CudaOps.CudaNativeOps;
 using static AnnotationTool.Ai.Utils.LearningRateOptimizer;
 using static AnnotationTool.Ai.Utils.DatasetStatistics;
 using static AnnotationTool.Ai.IO.ModelMetaData;
@@ -105,8 +104,8 @@ namespace AnnotationTool.Ai.Training
 				{
 					if (device.type == DeviceType.CUDA)
 					{
-						EmptyCudaCache();
-					}
+                        NativeTorchCudaOps.EmptyCudaCache();
+                    }
 				}
 			}, ct);
 		}

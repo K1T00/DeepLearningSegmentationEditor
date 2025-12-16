@@ -10,7 +10,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using TorchSharp;
-using static AnnotationTool.Ai.Utils.CudaOps.CudaNativeOps;
 using static TorchSharp.torch;
 using static TorchSharp.torch.nn;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
@@ -155,7 +154,7 @@ namespace AnnotationTool.Ai.Inference
 
                                 if (device.type == DeviceType.CUDA)
                                 {
-                                    EmptyCudaCache();
+                                    NativeTorchCudaOps.EmptyCudaCache();
                                 }
 
                                 if (ct.IsCancellationRequested)
@@ -170,7 +169,7 @@ namespace AnnotationTool.Ai.Inference
                 {
                     if (device.type == DeviceType.CUDA)
                     {
-                        EmptyCudaCache();
+                        NativeTorchCudaOps.EmptyCudaCache();
                     }
                 }
             }, ct);

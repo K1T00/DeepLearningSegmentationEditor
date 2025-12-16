@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/_DEV/_GIT/DeepLearningEditor/NativeTorchCudaOps/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

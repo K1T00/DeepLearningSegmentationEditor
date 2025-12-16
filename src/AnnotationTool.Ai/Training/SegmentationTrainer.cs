@@ -9,7 +9,6 @@ using static AnnotationTool.Ai.Utils.LossFunctions;
 using static TorchSharp.torch;
 using static TorchSharp.torch.optim;
 using static TorchSharp.torch.optim.lr_scheduler.impl;
-using static AnnotationTool.Ai.Utils.CudaOps.CudaNativeOps;
 
 namespace AnnotationTool.Ai.Training
 {
@@ -67,8 +66,8 @@ namespace AnnotationTool.Ai.Training
 				finally
 				{
 					if (ctx.Device.type == DeviceType.CUDA)
-						EmptyCudaCache();
-				}
+                        NativeTorchCudaOps.EmptyCudaCache();
+                }
 			}, ct);
 		}
 
