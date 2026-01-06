@@ -1,7 +1,3 @@
-# Ignore generated native build artifacts from GitHub language stats
-NativeTorchCudaOps/build/** linguist-vendored
-
-
 ###############################################################################
 # Set default behavior to automatically normalize line endings.
 ###############################################################################
