@@ -14,21 +14,21 @@ using static AnnotationTool.Core.Utils.CoreUtils;
 
 namespace AnnotationTool.Core.Services
 {
-	public class ProjectPresenter : IProjectPresenter
-	{
-		public event EventHandler ProjectLoaded;
-		public event EventHandler<string> ErrorOccured;
+    public class ProjectPresenter : IProjectPresenter
+    {
+        public event EventHandler ProjectLoaded;
+        public event EventHandler<string> ErrorOccured;
 
-		private readonly IImageService imageService;
+        private readonly IImageService imageService;
         private readonly JsonSerializerOptions jsonOptions;
-		private readonly IProjectOptionsService projectOptionsService;
+        private readonly IProjectOptionsService projectOptionsService;
 
-		public ProjectPresenter(IImageService imageService, JsonSerializerOptions jsonOptions, IProjectOptionsService projectOptionsService)
-		{
+        public ProjectPresenter(IImageService imageService, JsonSerializerOptions jsonOptions, IProjectOptionsService projectOptionsService)
+        {
             this.imageService = imageService;
-			this.jsonOptions = jsonOptions;
-			this.projectOptionsService = projectOptionsService;
-			this.Project = new DeepLearningProject();
+            this.jsonOptions = jsonOptions;
+            this.projectOptionsService = projectOptionsService;
+            this.Project = new DeepLearningProject();
         }
 
         public DeepLearningProject Project { get; private set; }
@@ -37,194 +37,182 @@ namespace AnnotationTool.Core.Services
 
         public string ProjectName { get; set; }
 
-        public Task LoadProjectAsync(string jsonPath, ImageRepository imagesRepo)
-		{
-			return Task.Run(() =>
-			{
-				try
-				{
-					this.ProjectPath = Path.GetDirectoryName(jsonPath);
-					this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
+        public void LoadProject(string jsonPath, ImageRepository imagesRepo)
+        {
+            try
+            {
+                this.ProjectPath = Path.GetDirectoryName(jsonPath);
+                this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
 
 
-					// Create folder structure if missing and get paths
-					projectOptionsService.EnsureAll(this.ProjectPath);
-					var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
-					var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
-					var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
+                // Create folder structure if missing and get paths
+                projectOptionsService.EnsureAll(this.ProjectPath);
+                var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
+                var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
+                var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
 
-					if (!File.Exists(jsonPath))
-					{
-						ErrorOccured?.Invoke(this, $"Project file not found: {jsonPath}");
-						return;
-					}
+                if (!File.Exists(jsonPath))
+                {
+                    ErrorOccured?.Invoke(this, $"Project file not found: {jsonPath}");
+                    return;
+                }
 
-					var json = File.ReadAllText(jsonPath);
-					var loadedTemp = JsonSerializer.Deserialize<DeepLearningProject>(json, jsonOptions);
+                var json = File.ReadAllText(jsonPath);
+                var loadedTemp = JsonSerializer.Deserialize<DeepLearningProject>(json, jsonOptions);
 
-					this.Project.CopyFrom(loadedTemp);
+                this.Project.CopyFrom(loadedTemp);
 
-					imagesRepo.Dispose();
+                imagesRepo.Dispose();
 
-					// Load any saved annotations/masks by GUID
-					if (this.Project.Images != null)
-					{
-						foreach (var it in Project.Images)
-						{
-							// Prefer a copied file under /images/{guid}.* if present; otherwise use the JSON path.
-							it.Path = ResolveImagePathFallback(imagesPath, it.Guid, it.Path, this.ProjectPath);
+                // Load any saved annotations/masks by GUID
+                if (this.Project.Images != null)
+                {
+                    foreach (var it in Project.Images)
+                    {
+                        // Prefer a copied file under /images/{guid}.* if present; otherwise use the JSON path.
+                        it.Path = ResolveImagePathFallback(imagesPath, it.Guid, it.Path, this.ProjectPath);
 
-							var id = it.Guid;
-							var rt = imagesRepo.GetRuntime(id);
+                        var id = it.Guid;
+                        var rt = imagesRepo.GetRuntime(id);
 
-							var annPng = Path.Combine(annotationsPath, id + ".png");
-							if (File.Exists(annPng))
-							{
-								using (var tmp = Image.FromFile(annPng))
-								{
-									rt.Annotation = new Bitmap(tmp); // unlocked copy
-								}
-							}
+                        var annPng = Path.Combine(annotationsPath, id + ".png");
+                        if (File.Exists(annPng))
+                        {
+                            using (var tmp = Image.FromFile(annPng))
+                            {
+                                rt.Annotation = new Bitmap(tmp); // unlocked copy
+                            }
+                        }
 
-							var maskPng = Path.Combine(masksPath, id + ".png");
-							if (File.Exists(maskPng))
-							{
-								LabelMask.TryLoadPng8(maskPng, out var lm);
-								rt.Mask = lm;
-							}
-						}
-					}
+                        var maskPng = Path.Combine(masksPath, id + ".png");
+                        if (File.Exists(maskPng))
+                        {
+                            LabelMask.TryLoadPng8(maskPng, out var lm);
+                            rt.Mask = lm;
+                        }
+                    }
+                }
 
-					// Thumbnail generation for UI responsiveness
-					if (this.Project.Images != null)
-					{
-						foreach (var img in this.Project.Images)
-						{
-							// kick off async thumbnail generation
-							_ = imageService.EnsureThumbnailAsync(img.Guid, img.Path);
-						}
-					}
+                // Thumbnail generation for UI responsiveness
+                if (this.Project.Images != null)
+                {
+                    foreach (var img in this.Project.Images)
+                    {
+                        // kick off async thumbnail generation
+                        _ = imageService.EnsureThumbnailAsync(img.Guid, img.Path);
+                    }
+                }
 
-					ProjectLoaded?.Invoke(this, EventArgs.Empty);
-				}
-				catch (OperationCanceledException) { /* canceled, ignore */ }
-				catch (Exception ex)
-				{
-					ErrorOccured?.Invoke(this, ex.Message);
-				}
-			});
+                ProjectLoaded?.Invoke(this, EventArgs.Empty);
+            }
+            catch (OperationCanceledException) { /* canceled, ignore */ }
+            catch (Exception ex)
+            {
+                ErrorOccured?.Invoke(this, ex.Message);
+            }
+        }
 
-			
-		}
+        public void UpdateTrainingSettings(string jsonPath)
+        {
+            try
+            {
+                var json = File.ReadAllText(jsonPath);
+                var settingsTemp = JsonSerializer.Deserialize<SavedModelPackage>(json, jsonOptions);
 
-		public Task UpdateTrainingSettingsAsync(string jsonPath)
-		{
-			return Task.Run(() =>
-			{
-				try
-				{
-					var json = File.ReadAllText(jsonPath);
-					var settingsTemp = JsonSerializer.Deserialize<DeepLearningSettings>(json, jsonOptions);
+                this.Project.Settings.CopyFrom(settingsTemp.Settings);
+            }
+            catch (Exception ex)
+            {
+                ErrorOccured?.Invoke(this, ex.Message);
+            }
+        }
 
-					this.Project.Settings.CopyFrom(settingsTemp);
-				}
-				catch (Exception ex)
-				{
-					ErrorOccured?.Invoke(this, ex.Message);
-				}
-			});
-		}
+        public void SaveProject(ImageRepository imagesRepo)
+        {
+            if (string.IsNullOrWhiteSpace(this.ProjectPath) || string.IsNullOrWhiteSpace(this.ProjectName))
+                throw new ArgumentException("Project path is empty.");
 
-		public Task SaveProjectAsync(ImageRepository imagesRepo)
-		{            
-			if (string.IsNullOrWhiteSpace(this.ProjectPath) || string.IsNullOrWhiteSpace(this.ProjectName))
-				throw new ArgumentException("Project path is empty.");
+            try
+            {
+                // Create folder structure if missing and get paths
+                projectOptionsService.EnsureAll(this.ProjectPath);
+                var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
+                var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
+                var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
+                var jsonPath = Path.Combine(this.ProjectPath, this.ProjectName + ".json");
 
-			return Task.Run(() =>
-			{
-				try
-				{
-					// Create folder structure if missing and get paths
-					projectOptionsService.EnsureAll(this.ProjectPath);
-					var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
-					var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
-					var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
-					var jsonPath = Path.Combine(this.ProjectPath, this.ProjectName + ".json");
+                // Copy source images into /images/{guid}.{ext}
+                foreach (var item in this.Project.Images)
+                {
+                    var id = item.Guid;
+                    var srcPath = item.Path;
 
-					// Copy source images into /images/{guid}.{ext}
-					foreach (var item in this.Project.Images)
-					{
-						var id = item.Guid;
-						var srcPath = item.Path;
+                    if (string.IsNullOrWhiteSpace(srcPath) || !File.Exists(srcPath))
+                        continue; // skip missing/empty
 
-						if (string.IsNullOrWhiteSpace(srcPath) || !File.Exists(srcPath))
-							continue; // skip missing/empty
+                    var ext = Path.GetExtension(srcPath);
+                    if (string.IsNullOrEmpty(ext)) ext = ".png"; // fallback
 
-						var ext = Path.GetExtension(srcPath);
-						if (string.IsNullOrEmpty(ext)) ext = ".png"; // fallback
+                    var dst = Path.Combine(imagesPath, id + ext);
+                    if (!File.Exists(dst) || !FilesAreSame(srcPath, dst))
+                        File.Copy(srcPath, dst, overwrite: true);
 
-						var dst = Path.Combine(imagesPath, id + ext);
-						if (!File.Exists(dst) || !FilesAreSame(srcPath, dst))
-							File.Copy(srcPath, dst, overwrite: true);
+                    item.Path = dst;
 
-						item.Path = dst;
+                    var rtItem = imagesRepo.GetRuntime(id);
 
-						var rtItem = imagesRepo.GetRuntime(id);
+                    if (rtItem.Annotation != null)
+                    {
+                        var path = Path.Combine(annotationsPath, id + ".png");
+                        rtItem.Annotation.Save(path, ImageFormat.Png);
+                    }
+                    if (rtItem.Mask != null)
+                    {
+                        var path = Path.Combine(masksPath, id + ".png");
+                        LabelMask.SavePng8(path, rtItem.Mask);
+                        item.MaskPath = path;
+                    }
+                }
 
-						if (rtItem.Annotation != null)
-						{
-							var path = Path.Combine(annotationsPath, id + ".png");
-							rtItem.Annotation.Save(path, ImageFormat.Png);
-						}
-						if (rtItem.Mask != null)
-						{
-							var path = Path.Combine(masksPath, id + ".png");
-							LabelMask.SavePng8(path, rtItem.Mask, palette: null);
-							item.MaskPath = path;
-						}
-					}
+                var json = JsonSerializer.Serialize(this.Project, jsonOptions);
+                File.WriteAllText(jsonPath, json);
+            }
+            catch (Exception ex)
+            {
+                ErrorOccured?.Invoke(this, ex.Message);
+            }
+        }
 
-					var json = JsonSerializer.Serialize(this.Project, jsonOptions);
-					File.WriteAllText(jsonPath, json);
-				}
-				catch (Exception ex)
-				{
-					ErrorOccured?.Invoke(this, ex.Message);
-				}
-			});
-		}
+        public void AddImage(string imagePath)
+        {
+            try
+            {
+                var item = EnsureItemForPath(this.Project, imagePath);
 
-		public Task AddImageAsync(string imagePath)
-		{
-			return Task.Run(() =>
-			{
-				try
-				{
-					var item = EnsureItemForPath(this.Project, imagePath);
+                // Kick off thumbnail generation
+                imageService.EnsureThumbnailAsync(item.Guid, item.Path).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ErrorOccured?.Invoke(this, ex.Message);
+            }
+        }
 
-					// Kick off thumbnail generation
-					imageService.EnsureThumbnailAsync(item.Guid, item.Path).ConfigureAwait(false);
-				}
-				catch (Exception ex)
-				{
-					ErrorOccured?.Invoke(this, ex.Message);
-				}
-			});
-		}
+        public void RemoveImage(Guid imageId)
+        {
+            if (this.Project == null)
+                return;
 
-		public Task RemoveImageAsync(Guid imageId)
-		{
-			if (this.Project == null) return Task.CompletedTask;
-
-			var toRemove = this.Project.Images.FirstOrDefault(i => i.Guid == imageId);
-			if (toRemove != null)
-			{
+            var toRemove = this.Project.Images.FirstOrDefault(i => i.Guid == imageId);
+            if (toRemove != null)
+            {
                 this.Project.Images.Remove(toRemove);
-				imageService.DropThumbnail(imageId);
-			}
+                imageService.DropThumbnail(imageId);
+            }
 
             // Project not saved yet, just return
-            if (this.ProjectPath == null) return Task.CompletedTask;
+            if (this.ProjectPath == null)
+                return;
 
             var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
             var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
@@ -248,37 +236,32 @@ namespace AnnotationTool.Core.Services
             {
                 SafeDeleteFile(f);
             }
+        }
 
-            return Task.CompletedTask;
-		}
-
-        public Task NewProjectAsync(string jsonPath)
+        public void NewProject(string jsonPath)
         {
-            return Task.Run(() =>
+            try
             {
-				try
-				{
-					if (string.IsNullOrWhiteSpace(jsonPath))
-						throw new ArgumentException("targetProjectJsonPath is empty.", nameof(jsonPath));
+                if (string.IsNullOrWhiteSpace(jsonPath))
+                    throw new ArgumentException("targetProjectJsonPath is empty.", nameof(jsonPath));
 
-					this.ProjectPath = Path.GetDirectoryName(jsonPath);
-					this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
+                this.ProjectPath = Path.GetDirectoryName(jsonPath);
+                this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
 
-					// Create folder structure if missing and get paths
-					projectOptionsService.EnsureAll(this.ProjectPath);
+                // Create folder structure if missing and get paths
+                projectOptionsService.EnsureAll(this.ProjectPath);
 
-					this.Project.CopyFrom(new DeepLearningProject());
+                this.Project.CopyFrom(new DeepLearningProject());
 
-					// Serialize json project file
-					var json = JsonSerializer.Serialize(this.Project, jsonOptions);
-					File.WriteAllText(jsonPath, json);
-				}
-				catch (Exception ex)
-				{
-					ErrorOccured?.Invoke(this, $"Error creating new project: {ex.Message}");
-					throw;
-				}
-			});
+                // Serialize json project file
+                var json = JsonSerializer.Serialize(this.Project, jsonOptions);
+                File.WriteAllText(jsonPath, json);
+            }
+            catch (Exception ex)
+            {
+                ErrorOccured?.Invoke(this, $"Error creating new project: {ex.Message}");
+                throw;
+            }
         }
 
         public IReadOnlyList<(string imagePath, string maskPath)> GetSlicedTrainingPairs(DatasetSplit split)
@@ -297,7 +280,7 @@ namespace AnnotationTool.Core.Services
                 .Select(img => img.Guid);
 
             var allSliceImages = Directory.EnumerateFiles(slicedImagesFolder, "*.png");
-            var allSliceMasks = Directory.EnumerateFiles(slicedMasksFolder, "*.png"); 
+            var allSliceMasks = Directory.EnumerateFiles(slicedMasksFolder, "*.png");
 
 
             foreach (var id in trainGuids)

@@ -1,21 +1,22 @@
-﻿using AnnotationTool.Ai.Models;
+﻿using AnnotationTool.Ai.Geometry;
+using AnnotationTool.Ai.Inference.Decoders;
+using AnnotationTool.Ai.Models;
+using AnnotationTool.Ai.Processing;
 using AnnotationTool.Core.IO;
 using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using TorchSharp;
-using static TorchSharp.torch;
-using static TorchSharp.torch.nn;
-using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
-using static AnnotationTool.Ai.Utils.ImageProcessing.ImageComposition;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageUtils;
-using static AnnotationTool.Ai.Utils.DatasetStatistics;
+using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
+using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Inference
 {
@@ -29,7 +30,6 @@ namespace AnnotationTool.Ai.Inference
         private readonly ISegmentationModelFactory modelFactory;
         private readonly ILogger<SegmentationInferencePipeline> logger;
         private readonly IProjectOptionsService projectOptionsService;
-        private Device device;
         private readonly IModelComplexityConfigProvider complexityProvider;
 
         public SegmentationInferencePipeline(
@@ -44,135 +44,155 @@ namespace AnnotationTool.Ai.Inference
             this.complexityProvider = complexityProvider;
         }
 
-        public Task RunAsync(
-            IProjectPresenter project,
-            string modelPath,
-            IProgress<int> progress,
-            CancellationToken ct)
+        public async Task RunInference(IProjectPresenter project, string modelPath, IProgress<int> progress, CancellationToken ct)
         {
-            return Task.Run(() =>
+
+            var device = new Device(project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Cpu
+                ? DeviceType.CPU
+                : DeviceType.CUDA);
+
+            try
             {
-                try
+                var segmentationMode = project.Project.Features.Count == 1
+                    ? SegmentationMode.Binary
+                    : SegmentationMode.Multiclass;
+
+                var heatmapImagesPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsImages);
+                var heatmapOverlaysPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsOverlays);
+
+                var cfg = complexityProvider.GetConfig(
+                    project.Project.Settings.TrainModelSettings.ModelComplexity,
+                    project.Project.Settings.PreprocessingSettings.SliceSize,
+                    project.Project.Settings.PreprocessingSettings.SliceSize);
+
+                using (var model = modelFactory.Create(project.Project, device, cfg).AsModule())
                 {
-                    ct.ThrowIfCancellationRequested();
+                    model.load(modelPath).to(cfg.TrainPrecision, true).eval();
 
-                    var deviceType = project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Cpu
-                    ? DeviceType.CPU
-                    : DeviceType.CUDA;
-                    device = new Device(deviceType);
-
-                    var heatmapImagesPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsImages);
-                    var heatmapOverlaysPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsOverlays);
-
-                    // Build config based on model complexity
-                    var cfg = complexityProvider.GetConfig(
-                        project.Project.Settings.TrainModelSettings.ModelComplexity,
-                        project.Project.Settings.PreprocessingSettings.SliceSize,
-                        project.Project.Settings.PreprocessingSettings.SliceSize);
-
-                    using (var model = modelFactory.Create(project, device, cfg).AsModule())
-                    using (var image = new Mat())
-                    using (var maskGroundTruth = new Mat())
+                    using (var d = NewDisposeScope())
+                    using (var decoder = CreateDecoder(segmentationMode, project, device.type))
+                    using (var inference = inference_mode())
                     {
-                        ct.ThrowIfCancellationRequested();
+                        var imgIndex = 0;
+                        var total = project.Project.Images.Count;
+                        var numClasses = project.Project.Features.Count + 1; // background + features
 
-
-                        // Load model file
-                        model.load(modelPath).to(cfg.TrainPrecision, true).eval();
-
-                        using (var d = NewDisposeScope())
-                        //using (var noGrad = no_grad())
-                        using (var inferenceMode = inference_mode())
+                        foreach (var img in project.Project.Images)
                         {
-                            var i = 0;
-                            foreach (var img in project.Project.Images)
+                            ct.ThrowIfCancellationRequested();
+
+                            var imgSpace = new SegmentationImageSpace(
+                                new OpenCvSharp.Size(img.ImageSize.Width, img.ImageSize.Height),
+                                new OpenCvSharp.Rect(img.Roi.X, img.Roi.Y, img.Roi.Width, img.Roi.Height),
+                                project.Project.Settings.PreprocessingSettings.SliceSize,
+                                project.Project.Settings.PreprocessingSettings.DownSample,
+                                project.Project.Settings.PreprocessingSettings.BorderPadding);
+
+                            var preProc = new SegmentationPreprocessor(imgSpace);
+                            var postProc = new SegmentationPostprocessor(imgSpace);
+
+                            using (var image = LoadImage(img.Path, project))
+                            using (var maskGt = Cv2.ImRead(img.MaskPath, ImreadModes.Grayscale))
                             {
-                                ct.ThrowIfCancellationRequested();
-
-                                if (project.Project.Settings.PreprocessingSettings.TrainAsGreyscale)
-                                {
-                                    Cv2.ImRead(img.Path, ImreadModes.Grayscale).CopyTo(image);
-                                }
-                                else
-                                {
-                                    Cv2.ImRead(img.Path, ImreadModes.Color).CopyTo(image);
-                                }
-
-                                Cv2.ImRead(img.MaskPath, ImreadModes.Grayscale).CopyTo(maskGroundTruth);
-
                                 var sw = Stopwatch.StartNew();
 
-                                var imageDs = DownSampleImage(image, project.Project.Settings.PreprocessingSettings.DownSample);
-                                var (nRowImages, nColumnImages) = GetAmtImages(imageDs.Height, imageDs.Width, project.Project.Settings.PreprocessingSettings.SliceSize, project.Project.Settings.PreprocessingSettings.BorderPadding);
-                                var slicedImages = SliceImage(imageDs, project.Project.Settings.PreprocessingSettings.SliceSize, project.Project.Settings.PreprocessingSettings.BorderPadding, nRowImages, nColumnImages);
+                                var imgTiles = preProc.ProcessImage(image);
 
-                                var roiImagesTensor =
-                                    SlicedImageToTensor(
-                                        slicedImages,
-                                        project.Project.Settings.PreprocessingSettings.TrainAsGreyscale,
-                                        device,
-                                        project.Project.Settings.PreprocessingSettings.Normalization,
-                                        cfg.TrainPrecision);
+                                // Tensor conversion + forward
+                                var inputTensor = SlicedImageToTensor(
+                                    imgTiles,
+                                    project.Project.Settings.PreprocessingSettings.TrainAsGreyscale,
+                                    device,
+                                    project.Project.Settings.PreprocessingSettings.Normalization,
+                                    cfg.TrainPrecision);
 
-                                var prediction = model.call(roiImagesTensor);
-                                var predictionSplit = TensorTo2DArray(functional.sigmoid(prediction));
-                                var resPredictionGreyImages = SlicedImageTensorToImage(predictionSplit);
-                                var mergedPredictionGreyImage = MergeImages(resPredictionGreyImages, nRowImages, nColumnImages);
-                                var predictionImageUs = UpSampleImage(mergedPredictionGreyImage, project.Project.Settings.PreprocessingSettings.DownSample);
+                                var logits = model.call(inputTensor);
+                                var predTilesDic = decoder.Decode(logits);
 
-                                // Depending on the up-sampled prediction image dimensions we need to add padding to the right and bottom of the image
-                                var paddedPredictionImageUs = new Mat();
-                                Cv2.CopyMakeBorder(
-                                    predictionImageUs,
-                                    paddedPredictionImageUs,
-                                    0,
-                                    image.Height - predictionImageUs.Height < 0 ? 0 : image.Height - predictionImageUs.Height,
-                                    0,
-                                    image.Width - predictionImageUs.Width < 0 ? 0 : image.Width - predictionImageUs.Width,
-                                    BorderTypes.Constant,
-                                    OpenCvSharp.Scalar.Black);
-
+                                var fullMaskPredictions = new Dictionary<int, Mat>();
+                                foreach (var predTiles in predTilesDic)
+                                {
+                                    fullMaskPredictions.Add(predTiles.Key, postProc.ProcessImageTiles(predTiles.Value));
+                                }
                                 sw.Stop();
 
-                                var (heatmapImage, heatmapOverlay) = ImageToHeatmap(
-                                    image,
-                                    paddedPredictionImageUs[0, image.Height, 0, image.Width], project.Project.Settings.HeatmapThreshold);
 
-
-                                img.SegmentationStats = ComputeMetrics(paddedPredictionImageUs[0, image.Height, 0, image.Width],
-                                    maskGroundTruth);
-                                img.SegmentationStats.InferenceMs = sw.Elapsed.TotalMilliseconds;
-
-                                Cv2.ImWrite(Path.Combine(heatmapImagesPath, img.Guid + ".png"), heatmapImage);
-                                Cv2.ImWrite(Path.Combine(heatmapOverlaysPath, img.Guid + ".png"), heatmapOverlay);
-
-                                i++;
-
-                                progress.Report(i == project.Project.Images.Count ? 100 : (int)(100.0 / project.Project.Images.Count * i));
-
-                                d.DisposeEverything();
-
-                                if (device.type == DeviceType.CUDA)
+                                //Visualization
+                                foreach (var kv in fullMaskPredictions)
                                 {
-                                    NativeTorchCudaOps.EmptyCudaCache();
+                                    // Create visualization
+                                    var (heatmap, overlay) =
+                                        ImageToHeatmap(
+                                            image,
+                                            kv.Value[0, image.Height, 0, image.Width],
+                                            project.Project.Settings.HeatmapThreshold);
+                                    try
+                                    {
+                                        var subDirHeatmap = Path.Combine(heatmapImagesPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                        var subDirOverlay = Path.Combine(heatmapOverlaysPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                        Directory.CreateDirectory(subDirHeatmap);
+                                        Directory.CreateDirectory(subDirOverlay);
+                                        Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + ".png"), heatmap);
+                                        Cv2.ImWrite(Path.Combine(subDirOverlay, img.Guid + ".png"), overlay);
+                                    }
+                                    finally
+                                    {
+                                        heatmap.Dispose();
+                                        overlay.Dispose();
+                                    }
                                 }
 
-                                if (ct.IsCancellationRequested)
-                                {
-                                    break;
-                                }
+                                // Segmentation stats
+                                img.SegmentationStats = decoder.ComputeMetrics(fullMaskPredictions, maskGt);
+
+                                img.InferenceMs = sw.Elapsed.TotalMilliseconds;
+
+                                DisposeTiles(imgTiles);
+                                DisposePred(fullMaskPredictions);
+                                DisposePreds(predTilesDic);
+                            }
+                            imgIndex++;
+                            progress.Report(imgIndex == project.Project.Images.Count ? 100 : (int)(100.0 / project.Project.Images.Count * imgIndex));
+
+                            if (device.type == DeviceType.CUDA)
+                            {
+                                NativeTorchCudaOps.EmptyCudaCache();
+                            }
+
+                            if (ct.IsCancellationRequested)
+                            {
+                                break;
                             }
                         }
                     }
                 }
-                finally
+                await Task.Yield();
+            }
+            finally
+            {
+                if (device.type == DeviceType.CUDA)
                 {
-                    if (device.type == DeviceType.CUDA)
-                    {
-                        NativeTorchCudaOps.EmptyCudaCache();
-                    }
+                    NativeTorchCudaOps.EmptyCudaCache();
                 }
-            }, ct);
+            }
+
         }
+
+        private static ISegmentationDecoder CreateDecoder(SegmentationMode mode, IProjectPresenter project, DeviceType device)
+        {
+            if (mode == SegmentationMode.Binary)
+            {
+                return new BinarySegmentationDecoder();
+            }
+            return new MulticlassSegmentationDecoder(project.Project.Features.Count + 1); // +1 for background
+        }
+
+        private static Mat LoadImage(string path, IProjectPresenter project)
+        {
+            return project.Project.Settings.PreprocessingSettings.TrainAsGreyscale
+                ? Cv2.ImRead(path, ImreadModes.Grayscale)
+                : Cv2.ImRead(path, ImreadModes.Color);
+        }
+
     }
 }

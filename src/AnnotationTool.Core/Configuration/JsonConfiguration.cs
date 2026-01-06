@@ -4,37 +4,37 @@ using System.Text.Json.Serialization;
 
 namespace AnnotationTool.Core.Configuration
 {
-	public static class JsonConfiguration
-	{
-		public static IServiceCollection AddJsonConfiguration(this IServiceCollection services)
-		{
-			var jsonOptions = new JsonSerializerOptions
-			{
-				// Human-readable formatting
-				WriteIndented = true,
+    public static class JsonConfiguration
+    {
+        public static IServiceCollection AddJsonConfiguration(this IServiceCollection services)
+        {
+            var jsonOptions = new JsonSerializerOptions
+            {
+                // Human-readable formatting
+                WriteIndented = true,
 
-				// camelCase property names (same as your old CamelCaseNamingStrategy)
-				PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                // camelCase property names (same as your old CamelCaseNamingStrategy)
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 
-				// Ignore null values
-				DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                // Ignore null values
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 
-				// Allow trailing commas in JSON files (optional but convenient)
-				AllowTrailingCommas = true,
+                // Allow trailing commas in JSON files (optional but convenient)
+                AllowTrailingCommas = true,
 
-				// Avoid exceptions on comments in JSON files
-				ReadCommentHandling = JsonCommentHandling.Skip
-			};
+                // Avoid exceptions on comments in JSON files
+                ReadCommentHandling = JsonCommentHandling.Skip
+            };
 
-			// Serialize enums as strings (recommended for readability & compatibility)
-			jsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+            // Serialize enums as strings (recommended for readability & compatibility)
+            jsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
 
-			// You may add custom converters here later if needed
-			// jsonOptions.Converters.Add(new MyCustomConverter());
+            // You may add custom converters here later if needed
+            // jsonOptions.Converters.Add(new MyCustomConverter());
 
-			services.AddSingleton(jsonOptions);
+            services.AddSingleton(jsonOptions);
 
-			return services;
-		}
-	}
+            return services;
+        }
+    }
 }

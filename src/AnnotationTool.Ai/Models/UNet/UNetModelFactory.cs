@@ -1,20 +1,21 @@
-﻿using AnnotationTool.Core.Services;
+﻿using AnnotationTool.Core.Models;
+using AnnotationTool.Core.Services;
 using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models.UNet
 {
-	public class UNetModelFactory : ISegmentationModelFactory
-	{
+    public class UNetModelFactory : ISegmentationModelFactory
+    {
 
         public UNetModelFactory()
         {
         }
 
-        public string Name => "UNet";
+        public string Name => "UNetModel";
 
-		public ISegmentationModel Create(IProjectPresenter project, Device device, SegmentationModelConfig cfg)
-		{
+        public ISegmentationModel Create(DeepLearningProject project, Device device, SegmentationModelConfig cfg)
+        {
             return new UNetModel(project, device, cfg);
-		}
-	}
+        }
+    }
 }

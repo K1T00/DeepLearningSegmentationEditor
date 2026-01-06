@@ -1,6 +1,5 @@
 ﻿using AnnotationTool.Core.Models;
 using ScottPlot;
-using SkiaSharp.Views.Desktop;
 using static AnnotationTool.Core.Utils.CoreUtils;
 
 namespace AnnotationTool.App.Controls

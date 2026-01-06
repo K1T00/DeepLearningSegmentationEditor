@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-internal static class NativeTorchCudaOps
+public static class NativeTorchCudaOps
 {
     private const string DllName = "NativeTorchCudaOps.dll";
 

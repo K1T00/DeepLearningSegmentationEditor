@@ -165,11 +165,9 @@ namespace AnnotationTool.App
             // annotationToolsControl
             // 
             annotationToolsControl.Enabled = false;
-            annotationToolsControl.EraseActive = false;
             annotationToolsControl.Location = new Point(220, 87);
             annotationToolsControl.Margin = new Padding(4);
             annotationToolsControl.Name = "annotationToolsControl";
-            annotationToolsControl.PaintActive = false;
             annotationToolsControl.Size = new Size(52, 289);
             annotationToolsControl.TabIndex = 6;
             annotationToolsControl.Visible = false;

@@ -4,17 +4,17 @@ using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using TorchSharp;
 using TorchSharp.Modules;
-using static AnnotationTool.Ai.Utils.AiUtils;
-using static AnnotationTool.Ai.Utils.LearningRateOptimizer;
-using static AnnotationTool.Ai.Utils.DatasetStatistics;
 using static AnnotationTool.Ai.IO.ModelMetaData;
+using static AnnotationTool.Ai.Utils.AiUtils;
 using static AnnotationTool.Ai.Utils.BatchSizeEstimator;
+using static AnnotationTool.Ai.Utils.DatasetStatistics;
+using static AnnotationTool.Ai.Utils.LearningRateOptimizer;
 using static TorchSharp.torch;
 using static TorchSharp.torch.optim;
 using static TorchSharp.torch.optim.lr_scheduler;
@@ -23,96 +23,94 @@ using static TorchSharp.torch.utils.data;
 
 namespace AnnotationTool.Ai.Training
 {
-	/// <summary>
-	/// High-level pipeline that orchestrates training for any ISegmentationModel produced by an ISegmentationModelFactory.
-	/// </summary>
-	public class SegmentationTrainingPipeline
-	{
-		private readonly ILogger<SegmentationTrainingPipeline> logger;
-		private readonly ISegmentationModelFactory modelFactory;
-		private readonly SegmentationTrainer trainer;
-		private readonly IProjectOptionsService projectOptionsService;
-		private readonly JsonSerializerOptions jsonOptions;
-		private Device device;
-		private readonly IModelComplexityConfigProvider complexityProvider;
+    /// <summary>
+    /// High-level pipeline that orchestrates training for any ISegmentationModel produced by an ISegmentationModelFactory.
+    /// </summary>
+    public class SegmentationTrainingPipeline
+    {
+        private readonly ILogger<SegmentationTrainingPipeline> logger;
+        private readonly ISegmentationModelFactory modelFactory;
+        private readonly SegmentationTrainer trainer;
+        private readonly IProjectOptionsService projectOptionsService;
+        private readonly JsonSerializerOptions jsonOptions;
+        private Device device;
+        private readonly IModelComplexityConfigProvider complexityProvider;
 
 
         public SegmentationTrainingPipeline(
-			ILogger<SegmentationTrainingPipeline> logger,
-			ISegmentationModelFactory modelFactory,
-			SegmentationTrainer trainer,
-			IProjectOptionsService projectOptionsService,
-			JsonSerializerOptions jsonOptions,
-			IModelComplexityConfigProvider complexityProvider)
-		{
-			this.logger = logger;
-			this.modelFactory = modelFactory;
-			this.trainer = trainer;
-			this.projectOptionsService = projectOptionsService;
-			this.jsonOptions = jsonOptions;
-			this.complexityProvider = complexityProvider;
+            ILogger<SegmentationTrainingPipeline> logger,
+            ISegmentationModelFactory modelFactory,
+            SegmentationTrainer trainer,
+            IProjectOptionsService projectOptionsService,
+            JsonSerializerOptions jsonOptions,
+            IModelComplexityConfigProvider complexityProvider)
+        {
+            this.logger = logger;
+            this.modelFactory = modelFactory;
+            this.trainer = trainer;
+            this.projectOptionsService = projectOptionsService;
+            this.jsonOptions = jsonOptions;
+            this.complexityProvider = complexityProvider;
         }
 
-		public Task TrainAsync(IProjectPresenter project, IProgress<LossReport> lossProgress, CancellationToken ct)
-		{
-			return Task.Run(async () =>
-			{
-				try
-				{
-					device = ResolveDevice(project.Project.Settings);
+        public async Task RunTraining(IProjectPresenter project, IProgress<LossReport> lossProgress, CancellationToken ct)
+        {
+            try
+            {
+                device = ResolveDevice(project.Project.Settings);
 
-					logger.LogInformation("Starting training on: " + device);
+                logger.LogInformation("Starting training on: " + device);
 
-					// Compute normalization statistics
-					project.Project.Settings.PreprocessingSettings.Normalization =
-						project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ?
-						ComputeGreyStats(project.Project.Images.Select(i => i.Path)) :
-						ComputeRgbStats(project.Project.Images.Select(i => i.Path));
+                // Compute normalization statistics
+                project.Project.Settings.PreprocessingSettings.Normalization =
+                    project.Project.Settings.PreprocessingSettings.TrainAsGreyscale
+                    ? ComputeGreyStats(project.Project.Images.Select(i => i.Path))
+                    : ComputeRgbStats(project.Project.Images.Select(i => i.Path));
 
-                    // Build config based on model complexity
-					var cfg = complexityProvider.GetConfig(
-						project.Project.Settings.TrainModelSettings.ModelComplexity,
-						project.Project.Settings.PreprocessingSettings.SliceSize,
-                        project.Project.Settings.PreprocessingSettings.SliceSize);
+                // Build training config based on model complexity
+                var cfg = complexityProvider.GetConfig(
+                    project.Project.Settings.TrainModelSettings.ModelComplexity,
+                    project.Project.Settings.PreprocessingSettings.SliceSize,
+                    project.Project.Settings.PreprocessingSettings.SliceSize);
 
-                    // Build dataset + dataloaders (+ augmentations)
-                    var (trainLoader, valLoader) = BuildDataLoaders(project, device, cfg);
+                // Build dataset + dataloaders (+ augmentations)
+                var (trainLoader, valLoader) = BuildDataLoaders(project, device, cfg);
 
-					var model = modelFactory.Create(project, device, cfg);
-					var optimizer = BuildOptimizer(model, project.Project.Settings);
+                var model = modelFactory.Create(project.Project, device, cfg);
+                var optimizer = BuildOptimizer(model, project.Project.Settings);
 
-					var ctx = new TrainingContext
-					{
-						Device = device,
-						Model = model,
-						Optimizer = optimizer,
-						TrainLoader = trainLoader,
-						ValLoader = valLoader,
-						Settings = project.Project.Settings,
-						StoppingMonitor = new TrainingStopMonitor(project.Project.Settings.TrainingStoppingSettings)
-					};
+                var ctx = new TrainingContext
+                {
+                    Device = device,
+                    Model = model,
+                    Optimizer = optimizer,
+                    TrainLoader = trainLoader,
+                    ValLoader = valLoader,
+                    Settings = project.Project.Settings,
+                    StoppingMonitor = new TrainingStopMonitor(project.Project.Settings.TrainingStoppingSettings),
+                    SegmentationMode = project.Project.Features.Count == 1 ? SegmentationMode.Binary : SegmentationMode.Multiclass
+                };
 
-					// Training loop
-					await trainer.RunAsync(ctx, lossProgress, ct).ConfigureAwait(false);
+                // Training loop
+                await trainer.RunTrainer(ctx, lossProgress, ct).ConfigureAwait(false);
 
-					logger.LogInformation("Training done.");
+                logger.LogInformation("Training done.");
 
-					// Save model and metadata
-					await SaveModelAndMetadataAsync(model.AsModule(), project, projectOptionsService, jsonOptions, logger);
-				}
-				finally
-				{
-					if (device.type == DeviceType.CUDA)
-					{
-                        NativeTorchCudaOps.EmptyCudaCache();
-                    }
-				}
-			}, ct);
-		}
+                // Save model and metadata
+                SaveModelAndMetadata(model.AsModule(), project, projectOptionsService, jsonOptions, logger);
+            }
+            finally
+            {
+                if (device.type == DeviceType.CUDA)
+                {
+                    NativeTorchCudaOps.EmptyCudaCache();
+                }
+            }
+        }
 
-		private (DataLoader trainLoader, DataLoader valLoader) BuildDataLoaders(IProjectPresenter project, Device device, SegmentationModelConfig cfg)
-		{
-			var nWorkers = 4;
+        private (DataLoader trainLoader, DataLoader valLoader) BuildDataLoaders(IProjectPresenter project, Device device, SegmentationModelConfig cfg)
+        {
+            var nWorkers = 4;
 
             var availableMemory =
                     project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Gpu ?
@@ -162,49 +160,49 @@ namespace AnnotationTool.Ai.Training
             var valPairs = project.GetSlicedTrainingPairs(DatasetSplit.Validate);
 
             Dataset finalTrainDataset = null;
-            var validationDataSet = new SegmentationDataset(valPairs, project, device, augmentations);
+            var validationDataSet = new SegmentationDataset(valPairs, project, device, augmentations, cfg);
 
             switch (project.Project.Settings.AugmentationSettings.AugmentationMode)
-			{
-				case AugmentationMode.Standard:
+            {
+                case AugmentationMode.Standard:
 
-                    finalTrainDataset = new SegmentationDataset(project.GetSlicedTrainingPairs(DatasetSplit.Train), project, device, augmentations);
-                    
-                    break;
-				case AugmentationMode.Duplication:
-
-					finalTrainDataset = new ConcatSegmentationDataset(
-						new SegmentationDataset(trainPairs, project, device, null), 
-						new SegmentationDataset(trainPairs, project, device, augmentations));
+                    finalTrainDataset = new SegmentationDataset(project.GetSlicedTrainingPairs(DatasetSplit.Train), project, device, augmentations, cfg);
 
                     break;
-				case AugmentationMode.FeatureAware:
+                case AugmentationMode.Duplication:
 
                     finalTrainDataset = new ConcatSegmentationDataset(
-						new SegmentationDataset(trainPairs, project, device, null),
-						new FilteredSegmentationDatasetDataset(trainPairs, project, device, augmentations));
+                        new SegmentationDataset(trainPairs, project, device, null, cfg),
+                        new SegmentationDataset(trainPairs, project, device, augmentations, cfg));
+
+                    break;
+                case AugmentationMode.FeatureAware:
+
+                    finalTrainDataset = new ConcatSegmentationDataset(
+                        new SegmentationDataset(trainPairs, project, device, null, cfg),
+                        new FilteredSegmentationDatasetDataset(trainPairs, project, device, augmentations, cfg));
 
                     break;
             }
 
-			return (DataLoader(finalTrainDataset, batchSize, true, device, num_worker: nWorkers), 
-				DataLoader(validationDataSet, batchSize, false, device, num_worker: nWorkers));
-		}
+            return (DataLoader(finalTrainDataset, batchSize, true, device, num_worker: nWorkers),
+                DataLoader(validationDataSet, batchSize, false, device, num_worker: nWorkers));
+        }
 
-		private static (Optimizer optimizer, LRScheduler scheduler) BuildOptimizer(ISegmentationModel model, DeepLearningSettings settings)
-		{
-			// ToDo
-			var maxEpochs = 300;
+        private static (Optimizer optimizer, LRScheduler scheduler) BuildOptimizer(ISegmentationModel model, DeepLearningSettings settings)
+        {
+            // ToDo
+            var maxEpochs = 300;
 
-			var module = model.AsModule();
-			var optimizer = BuildSegmentationOptimizer(module.parameters());
-			var lrScheduler = 
-				BuildSegmentationScheduler(
-					optimizer, 
-					settings.TrainingStoppingSettings.MaxIterationCount == 0 ? maxEpochs : settings.TrainingStoppingSettings.MaxIterationCount);
+            var module = model.AsModule();
+            var optimizer = BuildSegmentationOptimizer(module.parameters());
+            var lrScheduler =
+                BuildSegmentationScheduler(
+                    optimizer,
+                    settings.TrainingStoppingSettings.MaxIterationCount == 0 ? maxEpochs : settings.TrainingStoppingSettings.MaxIterationCount);
 
-			return (optimizer, lrScheduler);
-		}
+            return (optimizer, lrScheduler);
+        }
 
-	}
+    }
 }

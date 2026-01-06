@@ -1,44 +1,48 @@
 ﻿using AnnotationTool.Ai.Training;
 using AnnotationTool.Core.IO;
+using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
-using System.Threading.Tasks;
+using System.Text.Json;
 using static TorchSharp.torch;
 using static TorchSharp.torch.nn;
-using System.Text.Json;
 
 namespace AnnotationTool.Ai.IO
 {
-	public static class ModelMetaData
-	{
-		internal static Task SaveModelAndMetadataAsync(
-			Module<Tensor, Tensor> model, 
-			IProjectPresenter project,
-			IProjectOptionsService projectOptionsService, 
-			JsonSerializerOptions jsonOptions,
-			ILogger<SegmentationTrainingPipeline> logger)
-		{
-			return Task.Run(() =>
-			{
-				try
-				{
-					var (modelPath, jsonSettingsPath) =
-						projectOptionsService.GetModelMetadataFilePaths(projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.Models));
+    public static class ModelMetaData
+    {
+        internal static void SaveModelAndMetadata(
+            Module<Tensor, Tensor> model,
+            IProjectPresenter project,
+            IProjectOptionsService projectOptionsService,
+            JsonSerializerOptions jsonOptions,
+            ILogger<SegmentationTrainingPipeline> logger)
+        {
+            try
+            {
+                var (modelPath, jsonSettingsPath) =
+                    projectOptionsService.GetModelMetadataFilePaths(projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.Models));
 
-					model.save(modelPath);
+                model.save(modelPath);
 
-					var projectJson = JsonSerializer.Serialize(project.Project.Settings, jsonOptions);
-					File.WriteAllText(jsonSettingsPath, projectJson);
+                // Wrapper to save relevant metadata (that may be used for sdk)
+                var modelPackage = new SavedModelPackage
+                {
+                    Settings = project.Project.Settings,
+                    NumClasses = project.Project.Features.Count
+                };
 
-					logger.LogInformation("Model saved.");
-				}
-				catch (Exception ex)
-				{
-					logger.LogError(ex, "Error saving model and metadata.");
-				}
-			});
-		}
-	}
+                var projectJson = JsonSerializer.Serialize(modelPackage, jsonOptions);
+                File.WriteAllText(jsonSettingsPath, projectJson);
+
+                logger.LogInformation("Model saved.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error saving model and metadata.");
+            }
+        }
+    }
 }

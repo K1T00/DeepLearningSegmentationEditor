@@ -7,206 +7,329 @@ using static AnnotationTool.Ai.Utils.ImageProcessing.ImageUtils;
 
 namespace AnnotationTool.Ai.Utils
 {
-	public static class DatasetStatistics
-	{
-		public static SegmentationStats ComputeMetrics(Mat predicted, Mat groundTruth)
-		{
-			var intersection = new Mat();
-			var predBin = Binarize(predicted);
-			var gtBin = Binarize(groundTruth);
+    public static class DatasetStatistics
+    {
+        public static SegmentationStats ComputeBinaryMetrics(Mat predicted, Mat groundTruth)
+        {
+            var intersection = new Mat();
+            var predBin = Binarize(predicted);
+            var gtBin = Binarize(groundTruth);
 
-			Cv2.BitwiseAnd(predBin, gtBin, intersection);
+            Cv2.BitwiseAnd(predBin, gtBin, intersection);
 
-			var union = new Mat();
-			Cv2.BitwiseOr(predBin, gtBin, union);
+            var union = new Mat();
+            Cv2.BitwiseOr(predBin, gtBin, union);
 
-			double TP = Cv2.CountNonZero(intersection);
+            double TP = Cv2.CountNonZero(intersection);
 
-			var predOnly = new Mat();
-			Cv2.BitwiseAnd(predBin, ~gtBin, predOnly);
-			double FP = Cv2.CountNonZero(predOnly);
+            var predOnly = new Mat();
+            Cv2.BitwiseAnd(predBin, ~gtBin, predOnly);
+            double FP = Cv2.CountNonZero(predOnly);
 
-			var missed = new Mat();
-			Cv2.BitwiseAnd(~predBin, gtBin, missed);
-			double FN = Cv2.CountNonZero(missed);
+            var missed = new Mat();
+            Cv2.BitwiseAnd(~predBin, gtBin, missed);
+            double FN = Cv2.CountNonZero(missed);
 
-			double total = predBin.Rows * predBin.Cols;
-			var TN = total - TP - FP - FN;
+            double total = predBin.Rows * predBin.Cols;
+            var TN = total - TP - FP - FN;
 
-			var stats = new SegmentationStats();
-			stats.TP = (int)TP;
-			stats.FP = (int)FP;
-			stats.FN = (int)FN;
-			stats.TN = (int)TN;
+            var stats = new SegmentationStats();
+            stats.TP = (int)TP;
+            stats.FP = (int)FP;
+            stats.FN = (int)FN;
+            stats.TN = (int)TN;
 
-			// Add small epsilon to denominators to avoid division by zero
-			const double epsilon = 1e-8;
-			stats.IoU = TP / (TP + FP + FN + epsilon);
-			stats.Dice = (2 * TP) / (2 * TP + FP + FN + epsilon);
-			stats.Precision = TP / (TP + FP + epsilon);
-			stats.Recall = TP / (TP + FN + epsilon);
-			stats.Accuracy = (TP + TN) / (TP + TN + FP + FN + epsilon);
-			stats.FPR = FP / (FP + TN + epsilon);
-			stats.Specificity = TN / (TN + FP + epsilon);
+            // Add small epsilon to denominators to avoid division by zero
+            const double epsilon = 1e-8;
+            stats.IoU = TP / (TP + FP + FN + epsilon);
+            stats.Dice = (2 * TP) / (2 * TP + FP + FN + epsilon);
+            stats.Precision = TP / (TP + FP + epsilon);
+            stats.Recall = TP / (TP + FN + epsilon);
+            stats.Accuracy = (TP + TN) / (TP + TN + FP + FN + epsilon);
+            stats.FPR = FP / (FP + TN + epsilon);
+            stats.Specificity = TN / (TN + FP + epsilon);
 
-			return stats;
-		}
+            return stats;
+        }
 
-		public static (SegmentationStats macro, SegmentationStats micro) AggregateResults(IList<SegmentationStats> results)
-		{
-			if (results == null || results.Count == 0)
-				return (new SegmentationStats(), new SegmentationStats());
+        /// <summary>
+        /// Builds a class-id map from per-class probability maps using argmax.
+        /// </summary>
+        public static unsafe Mat BuildClassMapUnsafe(IReadOnlyList<Mat> probs)
+        {
+            int h = probs[0].Rows;
+            int w = probs[0].Cols;
+            int classCount = probs.Count;
 
-			const double Epsilon = 1e-8;
+            var classMap = new Mat(h, w, MatType.CV_8UC1, Scalar.Black);
 
-			// ----- MACRO (mean of per-image metrics) -----
-			var macro = new SegmentationStats
-			{
-				Dice = results.Average(r => r.Dice),
-				IoU = results.Average(r => r.IoU),
-				Precision = results.Average(r => r.Precision),
-				Recall = results.Average(r => r.Recall),
-				Accuracy = results.Average(r => r.Accuracy),
-				FPR = results.Average(r => r.FPR),
-				InferenceMs = results.Average(r => r.InferenceMs)
-			};
+            byte*[] probPtrs = new byte*[classCount];
+            int[] strides = new int[classCount];
 
-			// ----- MICRO (aggregate all TP/FP/FN/TN) -----
-			double TP = results.Sum(r => r.TP);
-			double FP = results.Sum(r => r.FP);
-			double FN = results.Sum(r => r.FN);
-			double TN = results.Sum(r => r.TN);
+            for (int c = 0; c < classCount; c++)
+            {
+                if (probs[c].Type() != MatType.CV_8UC1)
+                    throw new ArgumentException("Probability maps must be CV_8UC1.");
 
-			var micro = new SegmentationStats
-			{
-				TP = (int)TP,
-				FP = (int)FP,
-				FN = (int)FN,
-				TN = (int)TN,
+                if (probs[c].Rows != h || probs[c].Cols != w)
+                    throw new ArgumentException("Probability map size mismatch.");
 
-				IoU = TP / (TP + FP + FN + Epsilon),
-				Dice = (2.0 * TP) / (2.0 * TP + FP + FN + Epsilon),
-				Precision = TP / (TP + FP + Epsilon),
-				Recall = TP / (TP + FN + Epsilon),
-				Accuracy = (TP + TN) / (TP + TN + FP + FN + Epsilon),
-				FPR = FP / (FP + TN + Epsilon)
-			};
+                probPtrs[c] = (byte*)probs[c].DataPointer;
+                strides[c] = (int)probs[c].Step();
+            }
 
-			return (macro, micro);
-		}
+            byte* dstBase = (byte*)classMap.DataPointer;
+            int dstStride = (int)classMap.Step();
 
-		/// <summary>
-		/// Computes mean/std for an RGB dataset (3-channel, CV_8UC3).
-		/// Uses unsafe pointers for maximum speed.
-		/// </summary>
-		public static unsafe NormalizationSettings ComputeRgbStats(IEnumerable<string> imagePaths)
-		{
-			double sumR = 0, sumG = 0, sumB = 0;
-			double sqR = 0, sqG = 0, sqB = 0;
-			long count = 0;
+            for (int y = 0; y < h; y++)
+            {
+                byte* dstRow = dstBase + y * dstStride;
 
-			const float inv255 = 1f / 255f;
+                for (int x = 0; x < w; x++)
+                {
+                    byte bestProb = 0;
+                    byte bestClass = 0;
 
-			foreach (var path in imagePaths)
-			{
-				using (var img = Cv2.ImRead(path, ImreadModes.Color))
-				{
-					int h = img.Rows;
-					int w = img.Cols;
+                    for (int c = 0; c < classCount; c++)
+                    {
+                        byte p = *(probPtrs[c] + y * strides[c] + x);
+                        if (p > bestProb)
+                        {
+                            bestProb = p;
+                            bestClass = (byte)(c + 1); // +1 → skip background
+                        }
+                    }
 
-					byte* data = (byte*)img.DataPointer;
-					int stride = (int)img.Step();
+                    dstRow[x] = bestClass;
+                }
+            }
 
-					for (int y = 0; y < h; y++)
-					{
-						byte* row = data + y * stride;
+            return classMap;
+        }
 
-						for (int x = 0; x < w; x++)
-						{
-							byte* px = row + x * 3;
+        public static SegmentationStats ComputeMulticlassMetrics(Mat predictedClassMap, Mat groundTruthClassMap, int numClasses)
+        {
+            var stats = new SegmentationStats();
 
-							float b = px[0] * inv255;
-							float g = px[1] * inv255;
-							float r = px[2] * inv255;
+            long[] tp = new long[numClasses];
+            long[] fp = new long[numClasses];
+            long[] fn = new long[numClasses];
 
-							sumR += r; sumG += g; sumB += b;
-							sqR += r * r; sqG += g * g; sqB += b * b;
+            int h = predictedClassMap.Rows;
+            int w = predictedClassMap.Cols;
 
-							count++;
-						}
-					}
-				}
-			}
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    byte pred = predictedClassMap.At<byte>(y, x);
+                    byte gt = groundTruthClassMap.At<byte>(y, x);
 
-			float meanR = (float)(sumR / count);
-			float meanG = (float)(sumG / count);
-			float meanB = (float)(sumB / count);
+                    if (pred == gt)
+                    {
+                        tp[gt]++;
+                    }
+                    else
+                    {
+                        fp[pred]++;
+                        fn[gt]++;
+                    }
+                }
+            }
 
-			float stdR = (float)Math.Sqrt(sqR / count - meanR * meanR);
-			float stdG = (float)Math.Sqrt(sqG / count - meanG * meanG);
-			float stdB = (float)Math.Sqrt(sqB / count - meanB * meanB);
+            double sumIoU = 0.0;
+            double sumDice = 0.0;
+            int validClassCount = 0;
 
-			// avoid division-by-zero during normalization
-			if (stdR < 1e-6f) stdR = 1e-6f;
-			if (stdG < 1e-6f) stdG = 1e-6f;
-			if (stdB < 1e-6f) stdB = 1e-6f;
+            // Skip background (class 0) in reported averages
+            for (int c = 1; c < numClasses; c++)
+            {
+                long tpc = tp[c];
+                long fpc = fp[c];
+                long fnc = fn[c];
 
-			return new NormalizationSettings
-			{
-				Mean = new[] { meanR, meanG, meanB },
-				Std = new[] { stdR, stdG, stdB }
-			};
-		}
+                long denomIoU = tpc + fpc + fnc;
+                if (denomIoU == 0)
+                    continue; // class absent in both pred & gt
 
-		/// <summary>
-		/// Computes mean/std for a grayscale dataset (1-channel, CV_8UC1).
-		/// Uses unsafe pointers for absolute maximum speed.
-		/// </summary>
-		public static unsafe NormalizationSettings ComputeGreyStats(IEnumerable<string> imagePaths)
-		{
-			double sum = 0;
-			double sq = 0;
-			long count = 0;
+                double iou = (double)tpc / denomIoU;
+                double dice = (2.0 * tpc) / (2.0 * tpc + fpc + fnc);
 
-			const float inv255 = 1f / 255f;
+                sumIoU += iou;
+                sumDice += dice;
+                validClassCount++;
+            }
 
-			foreach (var path in imagePaths)
-			{
-				using (var img = Cv2.ImRead(path, ImreadModes.Grayscale))
-				{
-					int h = img.Rows;
-					int w = img.Cols;
+            if (validClassCount > 0)
+            {
+                stats.IoU = sumIoU / validClassCount;
+                stats.Dice = sumDice / validClassCount;
+            }
+            else
+            {
+                stats.IoU = 0.0;
+                stats.Dice = 0.0;
+            }
 
-					byte* data = (byte*)img.DataPointer;
-					int stride = (int)img.Step();
+            stats.Accuracy = tp.Sum() / (double)(h * w);
 
-					for (int y = 0; y < h; y++)
-					{
-						byte* row = data + y * stride;
+            return stats;
+        }
 
-						for (int x = 0; x < w; x++)
-						{
-							float v = row[x] * inv255;
-							sum += v;
-							sq += v * v;
-							count++;
-						}
-					}
-				}
-			}
+        public static (SegmentationStats macro, SegmentationStats micro) AggregateResults(IList<SegmentationStats> results)
+        {
+            if (results == null || results.Count == 0)
+                return (new SegmentationStats(), new SegmentationStats());
 
-			float mean = (float)(sum / count);
-			float std = (float)Math.Sqrt(sq / count - mean * mean);
-			if (std < 1e-6f) std = 1e-6f;
+            const double Epsilon = 1e-8;
 
-			return new NormalizationSettings
-			{
-				Mean = new[] { mean },
-				Std = new[] { std }
-			};
-		}
+            // ----- MACRO (mean of per-image metrics) -----
+            var macro = new SegmentationStats
+            {
+                Dice = results.Average(r => r.Dice),
+                IoU = results.Average(r => r.IoU),
+                Precision = results.Average(r => r.Precision),
+                Recall = results.Average(r => r.Recall),
+                Accuracy = results.Average(r => r.Accuracy),
+                FPR = results.Average(r => r.FPR),
+            };
+
+            // ----- MICRO (aggregate all TP/FP/FN/TN) -----
+            double TP = results.Sum(r => r.TP);
+            double FP = results.Sum(r => r.FP);
+            double FN = results.Sum(r => r.FN);
+            double TN = results.Sum(r => r.TN);
+
+            var micro = new SegmentationStats
+            {
+                TP = (int)TP,
+                FP = (int)FP,
+                FN = (int)FN,
+                TN = (int)TN,
+
+                IoU = TP / (TP + FP + FN + Epsilon),
+                Dice = (2.0 * TP) / (2.0 * TP + FP + FN + Epsilon),
+                Precision = TP / (TP + FP + Epsilon),
+                Recall = TP / (TP + FN + Epsilon),
+                Accuracy = (TP + TN) / (TP + TN + FP + FN + Epsilon),
+                FPR = FP / (FP + TN + Epsilon)
+            };
+
+            return (macro, micro);
+        }
+
+        /// <summary>
+        /// Computes mean/std for an RGB dataset (3-channel, CV_8UC3).
+        /// Uses unsafe pointers for maximum speed.
+        /// </summary>
+        public static unsafe NormalizationSettings ComputeRgbStats(IEnumerable<string> imagePaths)
+        {
+            double sumR = 0, sumG = 0, sumB = 0;
+            double sqR = 0, sqG = 0, sqB = 0;
+            long count = 0;
+
+            const float inv255 = 1f / 255f;
+
+            foreach (var path in imagePaths)
+            {
+                using (var img = Cv2.ImRead(path, ImreadModes.Color))
+                {
+                    int h = img.Rows;
+                    int w = img.Cols;
+
+                    byte* data = (byte*)img.DataPointer;
+                    int stride = (int)img.Step();
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        byte* row = data + y * stride;
+
+                        for (int x = 0; x < w; x++)
+                        {
+                            byte* px = row + x * 3;
+
+                            float b = px[0] * inv255;
+                            float g = px[1] * inv255;
+                            float r = px[2] * inv255;
+
+                            sumR += r; sumG += g; sumB += b;
+                            sqR += r * r; sqG += g * g; sqB += b * b;
+
+                            count++;
+                        }
+                    }
+                }
+            }
+
+            float meanR = (float)(sumR / count);
+            float meanG = (float)(sumG / count);
+            float meanB = (float)(sumB / count);
+
+            float stdR = (float)Math.Sqrt(sqR / count - meanR * meanR);
+            float stdG = (float)Math.Sqrt(sqG / count - meanG * meanG);
+            float stdB = (float)Math.Sqrt(sqB / count - meanB * meanB);
+
+            // avoid division-by-zero during normalization
+            if (stdR < 1e-6f) stdR = 1e-6f;
+            if (stdG < 1e-6f) stdG = 1e-6f;
+            if (stdB < 1e-6f) stdB = 1e-6f;
+
+            return new NormalizationSettings
+            {
+                Mean = new[] { meanR, meanG, meanB },
+                Std = new[] { stdR, stdG, stdB }
+            };
+        }
+
+        /// <summary>
+        /// Computes mean/std for a grayscale dataset (1-channel, CV_8UC1).
+        /// Uses unsafe pointers for absolute maximum speed.
+        /// </summary>
+        public static unsafe NormalizationSettings ComputeGreyStats(IEnumerable<string> imagePaths)
+        {
+            double sum = 0;
+            double sq = 0;
+            long count = 0;
+
+            const float inv255 = 1f / 255f;
+
+            foreach (var path in imagePaths)
+            {
+                using (var img = Cv2.ImRead(path, ImreadModes.Grayscale))
+                {
+                    int h = img.Rows;
+                    int w = img.Cols;
+
+                    byte* data = (byte*)img.DataPointer;
+                    int stride = (int)img.Step();
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        byte* row = data + y * stride;
+
+                        for (int x = 0; x < w; x++)
+                        {
+                            float v = row[x] * inv255;
+                            sum += v;
+                            sq += v * v;
+                            count++;
+                        }
+                    }
+                }
+            }
+
+            float mean = (float)(sum / count);
+            float std = (float)Math.Sqrt(sq / count - mean * mean);
+            if (std < 1e-6f) std = 1e-6f;
+
+            return new NormalizationSettings
+            {
+                Mean = new[] { mean },
+                Std = new[] { std }
+            };
+        }
 
 
 
-	}
+    }
 }
