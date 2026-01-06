@@ -19,6 +19,9 @@ The application is built with WinForms (C#) and TorchSharp, and supports both bi
 
 The current version is already usable for real projects, with continued improvements planned.
 
+### ⚠️ IMPORTANT 
+Calling native cuda function NativeTorchCudaOps.EmptyCudaCache() works with TorchSharp v0.105.2 with the included NativeTorchCudaOps.dll. If you update the version you have to rebuild
+the dll with the correct libtorch/cuda versions. Check NativeTorchCudaOps project. Or you can just comment out NativeTorchCudaOps.EmptyCudaCache().
 
 ### 📦 Included Sample Project
 
