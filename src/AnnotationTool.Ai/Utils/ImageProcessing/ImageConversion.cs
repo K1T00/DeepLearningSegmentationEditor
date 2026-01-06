@@ -5,104 +5,139 @@ using static TorchSharp.torch.nn;
 
 namespace AnnotationTool.Ai.Utils.ImageProcessing
 {
-	public class ImageConversion
-	{
-		// Tensor of [H x W] expected
-		// ToDo: SIMD optimization
-		public static unsafe Mat TensorToGreyImage(Tensor tens)
-		{
-			if (tens.Dimensions != 2)
-				throw new ArgumentException("Tensor must have shape [H, W]");
+    public class ImageConversion
+    {
+        // Tensor of [H x W] expected
+        public static unsafe Mat TensorToGreyImage(Tensor tens)
+        {
+            if (tens.Dimensions != 2)
+                throw new ArgumentException("Tensor must have shape [H, W]");
 
-			int h = (int)tens.shape[0];
-			int w = (int)tens.shape[1];
-			int count = w * h;
+            float[] src;
 
-			float[] src = tens.data<float>().ToArray();
+            if (tens.dtype != ScalarType.Float32)
+            {
+                Tensor t32 = tens.to_type(ScalarType.Float32);
+                src = t32.data<float>().ToArray();
+            }
+            else
+            {
+                src = tens.data<float>().ToArray();
+            }
 
-			Mat img = new Mat(h, w, MatType.CV_8UC1);
+            int h = (int)tens.shape[0];
+            int w = (int)tens.shape[1];
+            int count = w * h;
 
-			byte* dst = (byte*)img.DataPointer;
-			int stride = (int)img.Step();
+            Mat img = new Mat(h, w, MatType.CV_8UC1);
 
-			fixed (float* pSrc = src)
-			{
-				float* p = pSrc;
+            byte* dst = (byte*)img.DataPointer;
+            int stride = (int)img.Step();
 
-				for (int y = 0; y < h; y++)
-				{
-					byte* row = dst + y * stride;
+            fixed (float* pSrc = src)
+            {
+                float* p = pSrc;
 
-					for (int x = 0; x < w; x++)
-					{
-						float v = *p++;
-						// clamp to avoid overflows
-						if (v < 0f) v = 0f;
-						if (v > 1f) v = 1f;
+                for (int y = 0; y < h; y++)
+                {
+                    byte* row = dst + y * stride;
 
-						row[x] = (byte)(v * 255f);
-					}
-				}
-			}
+                    for (int x = 0; x < w; x++)
+                    {
+                        float v = *p++;
+                        // clamp to avoid overflows
+                        if (v < 0f) v = 0f;
+                        if (v > 1f) v = 1f;
 
-			return img;
-		}
+                        row[x] = (byte)(v * 255f);
+                    }
+                }
+            }
 
-		// Tensor of [3 x H x W] expected
-		// ToDo: SIMD optimization
-		public static unsafe Mat TensorToRgbImage(Tensor tens)
-		{
-			int h = (int)tens.shape[1];
-			int w = (int)tens.shape[2];
-			int count = w * h;
+            return img;
+        }
 
-			// Allocate OpenCV Mat in BGR format
-			Mat img = new Mat(h, w, MatType.CV_8UC3);
+        // Tensor of [3 x H x W] expected
+        public static unsafe Mat TensorToRgbImage(Tensor tens)
+        {
+            int h = (int)tens.shape[1];
+            int w = (int)tens.shape[2];
+            int count = w * h;
 
-			// Apply sigmoid once per channel
-			float[] rSrc = functional.sigmoid(tens[0]).data<float>().ToArray();
-			float[] gSrc = functional.sigmoid(tens[1]).data<float>().ToArray();
-			float[] bSrc = functional.sigmoid(tens[2]).data<float>().ToArray();
+            // Allocate OpenCV Mat in BGR format
+            Mat img = new Mat(h, w, MatType.CV_8UC3);
 
-			byte* dst = (byte*)img.DataPointer;
-			int stride = (int)img.Step(); // bytes per row
+            float[] rSrc;
+            float[] gSrc;
+            float[] bSrc;
 
-			fixed (float* pR = rSrc)
-			fixed (float* pG = gSrc)
-			fixed (float* pB = bSrc)
-			{
-				float* rPtr = pR;
-				float* gPtr = pG;
-				float* bPtr = pB;
+            if (tens.dtype != ScalarType.Float32)
+            {
+                // Apply sigmoid once per channel
+                Tensor r = functional.sigmoid(tens[0]).to_type(ScalarType.Float32);
+                Tensor g = functional.sigmoid(tens[1]).to_type(ScalarType.Float32);
+                Tensor b = functional.sigmoid(tens[2]).to_type(ScalarType.Float32);
 
-				for (int y = 0; y < h; y++)
-				{
-					byte* row = dst + y * stride;
+                rSrc = r.data<float>().ToArray();
+                gSrc = g.data<float>().ToArray();
+                bSrc = b.data<float>().ToArray();
+            }
+            else
+            {
+                // Apply sigmoid once per channel
+                rSrc = functional.sigmoid(tens[0]).data<float>().ToArray();
+                gSrc = functional.sigmoid(tens[1]).data<float>().ToArray();
+                bSrc = functional.sigmoid(tens[2]).data<float>().ToArray();
+            }
 
-					for (int x = 0; x < w; x++)
-					{
-						// Read float in [0..1]
-						float rf = *rPtr++;
-						float gf = *gPtr++;
-						float bf = *bPtr++;
+            byte* dst = (byte*)img.DataPointer;
+            int stride = (int)img.Step(); // bytes per row
 
-						// Clamp for safety
-						if (rf < 0f) rf = 0f; else if (rf > 1f) rf = 1f;
-						if (gf < 0f) gf = 0f; else if (gf > 1f) gf = 1f;
-						if (bf < 0f) bf = 0f; else if (bf > 1f) bf = 1f;
+            fixed (float* pR = rSrc)
+            fixed (float* pG = gSrc)
+            fixed (float* pB = bSrc)
+            {
+                float* rPtr = pR;
+                float* gPtr = pG;
+                float* bPtr = pB;
 
-						// Write BGR (OpenCV format)
-						byte* px = row + x * 3;
-						px[0] = (byte)(bf * 255f); // B
-						px[1] = (byte)(gf * 255f); // G
-						px[2] = (byte)(rf * 255f); // R
-					}
-				}
-			}
+                for (int y = 0; y < h; y++)
+                {
+                    byte* row = dst + y * stride;
 
-			return img;
-		}
+                    for (int x = 0; x < w; x++)
+                    {
+                        // Read float in [0..1]
+                        float rf = *rPtr++;
+                        float gf = *gPtr++;
+                        float bf = *bPtr++;
 
+                        // Clamp for safety
+                        if (rf < 0f) rf = 0f; else if (rf > 1f) rf = 1f;
+                        if (gf < 0f) gf = 0f; else if (gf > 1f) gf = 1f;
+                        if (bf < 0f) bf = 0f; else if (bf > 1f) bf = 1f;
 
-	}
+                        // Write BGR (OpenCV format)
+                        byte* px = row + x * 3;
+                        px[0] = (byte)(bf * 255f); // B
+                        px[1] = (byte)(gf * 255f); // G
+                        px[2] = (byte)(rf * 255f); // R
+                    }
+                }
+            }
+            return img;
+        }
+
+        public static Mat[] ClassIndexTensorToImages(Tensor t)
+        {
+            int n = (int)t.shape[0];
+            Mat[] result = new Mat[n];
+
+            for (int i = 0; i < n; i++)
+                result[i] = TensorToGreyImage(t[i].to_type(ScalarType.Byte));
+
+            return result;
+        }
+
+    }
 }

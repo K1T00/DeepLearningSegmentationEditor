@@ -5,7 +5,7 @@ using static TorchSharp.torch;
 namespace AnnotationTool.Ai.Utils
 {
     /// <summary>
-    /// WIP
+    ///                      WIP
     /// </summary>
     public static class BatchSizeEstimator
     {
@@ -38,7 +38,7 @@ namespace AnnotationTool.Ai.Utils
             if (precision == ScalarType.Float16 || precision == ScalarType.BFloat16)
                 bpe = 2;
 
-            
+
             // Estimate convolutional activation memory
             double activations = SumActivationsUNet(
                 imageHeight,
@@ -137,7 +137,7 @@ namespace AnnotationTool.Ai.Utils
                 }
             }
 
-            
+
             // Bottleneck
             int bottleneckC = firstFilter << depth;
             sum += convsPerBlock * curH * curW * bottleneckC;
@@ -145,7 +145,7 @@ namespace AnnotationTool.Ai.Utils
             if (useSelfAttention)
                 sum += curH * curW * bottleneckC * 0.7; // safe approx
 
-            
+
             // Decoder
             for (int i = depth - 1; i >= 0; i--)
             {

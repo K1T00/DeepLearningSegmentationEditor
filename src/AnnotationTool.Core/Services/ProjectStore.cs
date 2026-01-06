@@ -1,32 +1,34 @@
-﻿using System;
+﻿using AnnotationTool.Core.Models;
+using System;
 using System.Linq;
-using AnnotationTool.Core.Models;
 
 
 namespace AnnotationTool.Core.Services
 {
-	public static class ProjectStore
-	{
-		public static ImageItem EnsureItemForPath(DeepLearningProject project, string path)
-		{
-			var existing = project.Images
-				.FirstOrDefault(i => string.Equals(i.Path, path, StringComparison.OrdinalIgnoreCase));
-			if (existing != null) return existing;
+    public static class ProjectStore
+    {
+        public static ImageItem EnsureItemForPath(DeepLearningProject project, string path)
+        {
+            var existing = project.Images
+                .FirstOrDefault(i => string.Equals(i.Path, path, StringComparison.OrdinalIgnoreCase));
 
-			var item = new ImageItem
-			{
-				Path = path,
-				Split = DatasetSplit.Train
-			};
-			project.Images.Add(item);
-			return item;
-		}
+            if (existing != null)
+                return existing;
 
-		public static string GetPath(DeepLearningProject project, Guid id)
-			=> project.Images.FirstOrDefault(i => i.Guid == id)?.Path;
+            var item = new ImageItem
+            {
+                Path = path,
+                Split = DatasetSplit.Train
+            };
+            project.Images.Add(item);
+            return item;
+        }
 
-		public static ImageItem FindById(DeepLearningProject project, Guid id)
-			=> project.Images.FirstOrDefault(i => i.Guid == id);
+        public static string GetPath(DeepLearningProject project, Guid id)
+            => project.Images.FirstOrDefault(i => i.Guid == id)?.Path;
+
+        public static ImageItem FindById(DeepLearningProject project, Guid id)
+            => project.Images.FirstOrDefault(i => i.Guid == id);
 
         public static ImageItem FindByPath(DeepLearningProject project, string path)
             => project.Images.FirstOrDefault(i => i.Path == path);

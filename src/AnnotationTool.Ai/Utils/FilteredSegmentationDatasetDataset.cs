@@ -1,16 +1,16 @@
-﻿using AnnotationTool.Core.Services;
+﻿using AnnotationTool.Ai.Models;
+using AnnotationTool.Core.Services;
 using OpenCvSharp;
-using System;
 using System.Collections.Generic;
-using static TorchSharp.torch;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageAnalysis;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
+using static TorchSharp.torch;
 
 
 namespace AnnotationTool.Ai.Utils
 {
     // This is mostly duplicattion from SegmentationDataset.
-    // ToDo: refactor later (maybe this is not needed because diminishing results since one can use ROIs)
+    // ToDo: refactor later (or maybe this is not needed because diminishing results since one can use ROIs)
     public class FilteredSegmentationDatasetDataset : utils.data.Dataset
     {
         private readonly List<Tensor> data = new List<Tensor>();
@@ -20,14 +20,20 @@ namespace AnnotationTool.Ai.Utils
         private readonly Device device;
         private readonly IReadOnlyList<(string imagePath, string maskPath)> imagePairs;
         private readonly IProjectPresenter project;
-        private readonly static ScalarType trainPrecision = ScalarType.Float32;
+        private readonly SegmentationModelConfig cfg;
 
-        public FilteredSegmentationDatasetDataset(IReadOnlyList<(string imagePath, string maskPath)> imagePairs, IProjectPresenter project, Device device, IPairedTransform transforms)
+        public FilteredSegmentationDatasetDataset(
+            IReadOnlyList<(string imagePath, string maskPath)> imagePairs,
+            IProjectPresenter project,
+            Device device,
+            IPairedTransform transforms,
+            SegmentationModelConfig cfg)
         {
             this.imagePairs = imagePairs;
             this.device = device;
             this.transforms = transforms;
             this.project = project;
+            this.cfg = cfg;
             count = ReadFiles();
         }
 
@@ -36,16 +42,21 @@ namespace AnnotationTool.Ai.Utils
             // For every image there needs to be one mask per feature
             for (var imIdx = 0; imIdx < imagePairs.Count; imIdx++)
             {
-
-                if (project.Project.Features.Count != 1)
-                    throw new ArgumentException("FilteredSegmentationDatasetDataset currently only supports one feature per project.");
-
-
                 using (var mskGrey = Cv2.ImRead(imagePairs[imIdx].maskPath, ImreadModes.Grayscale))
                 {
                     if (IsBlobInImage(mskGrey))
                     {
-                        masks.Add(MaskToTensor(mskGrey, device, trainPrecision));
+                        // Masks
+                        if (project.Project.Features.Count == 1)
+                        {
+
+                            masks.Add(BinaryMaskToTensor(mskGrey, device));
+                        }
+                        else
+                        {
+                            masks.Add(MulticlassMaskToTensor(mskGrey, device));
+                        }
+
 
                         // Images
                         if (project.Project.Settings.PreprocessingSettings.TrainAsGreyscale)
@@ -56,7 +67,7 @@ namespace AnnotationTool.Ai.Utils
                                     GreyMatToNormalizedTensor(
                                         img,
                                         device,
-                                        trainPrecision,
+                                        cfg.TrainPrecision,
                                         project.Project.Settings.PreprocessingSettings.Normalization)
                                     );
                             }
@@ -65,12 +76,11 @@ namespace AnnotationTool.Ai.Utils
                         {
                             using (var img = Cv2.ImRead(imagePairs[imIdx].imagePath, ImreadModes.Color))
                             {
-                                //data.Add(RgbImageToTensor(img, device, project.Project.Settings.HyperParameters.TrainPrecision));
                                 data.Add(
                                     RgbMatToNormalizedTensor(
                                         img,
                                         device,
-                                        trainPrecision,
+                                        cfg.TrainPrecision,
                                         project.Project.Settings.PreprocessingSettings.Normalization)
                                     );
 

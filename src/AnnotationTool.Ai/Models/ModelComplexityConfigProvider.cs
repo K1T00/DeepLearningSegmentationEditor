@@ -1,4 +1,5 @@
 ﻿using AnnotationTool.Core.Models;
+using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models
 {
@@ -42,14 +43,13 @@ namespace AnnotationTool.Ai.Models
     ///
     public class ModelComplexityConfigProvider : IModelComplexityConfigProvider
     {
-        public SegmentationModelConfig GetConfig(
-            ModelComplexity complexity,
-            int imageWidth,
-            int imageHeight)
+        public SegmentationModelConfig GetConfig(ModelComplexity complexity, int imageWidth, int imageHeight)
         {
-            SegmentationModelConfig cfg = new SegmentationModelConfig();
+            var cfg = new SegmentationModelConfig();
 
-            
+            //cfg.TrainPrecision = ScalarType.BFloat16;
+            cfg.TrainPrecision = ScalarType.Float32;
+
             if (complexity == ModelComplexity.Low)
             {
                 cfg.Depth = 2;
@@ -91,7 +91,7 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseInterpolationDown = false;
                 cfg.UseInterpolationUp = false;
 
-                cfg.UseInstanceNorm = false;
+                cfg.UseInstanceNorm = true;
                 cfg.UseDropout = false;
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;

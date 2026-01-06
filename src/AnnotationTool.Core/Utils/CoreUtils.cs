@@ -1,201 +1,239 @@
 ﻿using AnnotationTool.Core.Models;
 using ILGPU;
 using ILGPU.Runtime;
+using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using Microsoft.Win32;
 
 
 namespace AnnotationTool.Core.Utils
 {
-	public static class CoreUtils
-	{
+    public static class CoreUtils
+    {
 
-		/// <summary>
-		/// Calculate luminance and return appropriate text color (black or white)
-		/// W3C relative luminance formula: L = 0.299R + 0.587G + 0.114B
-		/// Black for light backgrounds, white for dark backgrounds
-		/// </summary>
-		/// <param name="bgColor"></param>
-		/// <returns></returns>
-		public static Color GetContrastTextColor(Color bgColor)
-		{
-			var luminance = (0.299 * bgColor.R + 0.587 * bgColor.G + 0.114 * bgColor.B) / 255;
-			return luminance > 0.5 ? Color.Black : Color.White; 
-		}
+        /// <summary>
+        /// Calculate luminance and return appropriate text color (black or white)
+        /// W3C relative luminance formula: L = 0.299R + 0.587G + 0.114B
+        /// Black for light backgrounds, white for dark backgrounds
+        /// </summary>
+        /// <param name="bgColor"></param>
+        /// <returns></returns>
+        public static Color GetContrastTextColor(Color bgColor)
+        {
+            var luminance = (0.299 * bgColor.R + 0.587 * bgColor.G + 0.114 * bgColor.B) / 255;
+            return luminance > 0.5 ? Color.Black : Color.White;
+        }
 
-		public static RoiMode? GetHitMode(Point mousePos, Rectangle screenROI)
-		{
-			const int grabSize = 8;
+        public static RoiMode? GetRoiHitMode(PointF mouseScreen, RectangleF roiImg, Viewport viewport)
+        {
 
-			// Corner handles
-			if (new Rectangle(screenROI.Left - grabSize / 2, screenROI.Top - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingNW;
-			if (new Rectangle(screenROI.Right - grabSize / 2, screenROI.Top - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingNE;
-			if (new Rectangle(screenROI.Left - grabSize / 2, screenROI.Bottom - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingSW;
-			if (new Rectangle(screenROI.Right - grabSize / 2, screenROI.Bottom - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingSE;
+            const float grabSizePx = 18f;
+            float grabImg = grabSizePx / viewport.Zoom;
 
-			// Side handles
-			if (new Rectangle(screenROI.Left + screenROI.Width / 2 - grabSize / 2, screenROI.Top - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingN;
-			if (new Rectangle(screenROI.Left + screenROI.Width / 2 - grabSize / 2, screenROI.Bottom - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingS;
-			if (new Rectangle(screenROI.Left - grabSize / 2, screenROI.Top + screenROI.Height / 2 - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingW;
-			if (new Rectangle(screenROI.Right - grabSize / 2, screenROI.Top + screenROI.Height / 2 - grabSize / 2, grabSize, grabSize).Contains(mousePos)) return RoiMode.ResizingE;
+            RectangleF Handle(float cx, float cy) =>
+                new RectangleF(
+                    cx - grabImg / 2,
+                    cy - grabImg / 2,
+                    grabImg,
+                    grabImg);
 
-			return null;
-		}
+            // Corners
+            if (Handle(roiImg.Left, roiImg.Top).Contains(mouseScreen)) return RoiMode.ResizingNW;
+            if (Handle(roiImg.Right, roiImg.Top).Contains(mouseScreen)) return RoiMode.ResizingNE;
+            if (Handle(roiImg.Left, roiImg.Bottom).Contains(mouseScreen)) return RoiMode.ResizingSW;
+            if (Handle(roiImg.Right, roiImg.Bottom).Contains(mouseScreen)) return RoiMode.ResizingSE;
 
-		public static bool FilesAreSame(string a, string b)
-		{
-			if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
-				return true;
+            // Edges
+            if (Handle(roiImg.Left + roiImg.Width / 2, roiImg.Top).Contains(mouseScreen)) return RoiMode.ResizingN;
+            if (Handle(roiImg.Left + roiImg.Width / 2, roiImg.Bottom).Contains(mouseScreen)) return RoiMode.ResizingS;
+            if (Handle(roiImg.Left, roiImg.Top + roiImg.Height / 2).Contains(mouseScreen)) return RoiMode.ResizingW;
+            if (Handle(roiImg.Right, roiImg.Top + roiImg.Height / 2).Contains(mouseScreen)) return RoiMode.ResizingE;
 
-			var fa = new FileInfo(a);
-			var fb = new FileInfo(b);
+            return null;
+        }
 
-			if (!fa.Exists || !fb.Exists)
-				return false;
+        public static RectangleF ClampRoi(RectangleF roi, float imgW, float imgH)
+        {
+            float x = Math.Max(0, roi.X);
+            float y = Math.Max(0, roi.Y);
 
-			return fa.Length == fb.Length && fa.LastWriteTimeUtc == fb.LastWriteTimeUtc;
-		}
+            float w = Math.Min(roi.Width, imgW - x);
+            float h = Math.Min(roi.Height, imgH - y);
 
-		public static Color GetDatasetSplitCategoryColor(DatasetSplit cat)
-		{
-			switch (cat)
-			{
-				case DatasetSplit.Train: return Color.Green;
-				case DatasetSplit.Validate: return Color.Yellow;
-				case DatasetSplit.Test: return Color.Orange;
-				default: return Color.Green;
-			}
-		}
+            return new RectangleF(x, y, Math.Max(1, w), Math.Max(1, h));
+        }
 
-		public static Color GetDatasetSplitCategoryTextColor(DatasetSplit cat)
-		{
-			switch (cat)
-			{
-				case DatasetSplit.Train: return Color.White;
-				case DatasetSplit.Validate: return Color.Black;
-				case DatasetSplit.Test: return Color.White;
-				default: return Color.White;
-			}
-		}
+        public static bool FilesAreSame(string a, string b)
+        {
+            if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+                return true;
 
-		public static Rectangle EnsureRoi(Rectangle roi, int width, int height)
-		{
-			var bounds = new Rectangle(0, 0, width, height);
-			if (width <= 0 || height <= 0) return Rectangle.Empty;
+            var fa = new FileInfo(a);
+            var fb = new FileInfo(b);
 
-			if (roi.Width <= 0 || roi.Height <= 0)
-				return bounds;
+            if (!fa.Exists || !fb.Exists)
+                return false;
 
-			var clamped = Rectangle.Intersect(bounds, roi);
-			return (clamped.Width > 0 && clamped.Height > 0) ? clamped : bounds;
-		}
+            return fa.Length == fb.Length && fa.LastWriteTimeUtc == fb.LastWriteTimeUtc;
+        }
 
-		public static void SafeDeleteFile(string path)
-		{
-			try { if (File.Exists(path)) File.Delete(path); }
-			catch { }
-		}
+        public static Color GetDatasetSplitCategoryColor(DatasetSplit cat)
+        {
+            switch (cat)
+            {
+                case DatasetSplit.Train: return Color.Green;
+                case DatasetSplit.Validate: return Color.Yellow;
+                case DatasetSplit.Test: return Color.Orange;
+                default: return Color.Green;
+            }
+        }
 
-		public static string ResolveImagePathFallback(string imagesDir, Guid id, string pathFromJson, string projectRoot)
-		{
-			// Prefer images/{guid}.*
-			if (Directory.Exists(imagesDir))
-			{
-				var pattern = id.ToString("D") + ".*";
-				var found = Directory.EnumerateFiles(imagesDir, pattern).FirstOrDefault();
-				if (found != null) return found;
-			}
+        public static Color GetDatasetSplitCategoryTextColor(DatasetSplit cat)
+        {
+            switch (cat)
+            {
+                case DatasetSplit.Train: return Color.White;
+                case DatasetSplit.Validate: return Color.Black;
+                case DatasetSplit.Test: return Color.White;
+                default: return Color.White;
+            }
+        }
 
-			// Otherwise use the JSON path (make absolute if relative)
-			var candidate = pathFromJson ?? string.Empty;
-			if (string.IsNullOrWhiteSpace(candidate)) return candidate;
+        public static void SafeDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch { }
+        }
 
-			if (!Path.IsPathRooted(candidate))
-				candidate = Path.GetFullPath(Path.Combine(projectRoot, candidate));
+        public static bool TryDeleteDirectoryContents(string directoryPath, out string error)
+        {
+            error = null;
+            try
+            {
+                if (!Directory.Exists(directoryPath))
+                    return true;
 
-			return candidate;
-		}
+                var directoryInfo = new DirectoryInfo(directoryPath);
 
-		public static bool IsAllZero(SegmentationStats stats)
-		{
-			if (stats == null)
-				return true;
+                foreach (FileInfo file in directoryInfo.GetFiles())
+                {
+                    file.Delete();
+                }
 
-			var properties = typeof(SegmentationStats)
-				.GetProperties()
-				.Where(p => p.CanRead &&
-							(p.PropertyType == typeof(int) || p.PropertyType == typeof(double)));
+                foreach (DirectoryInfo subDirectory in directoryInfo.GetDirectories())
+                {
+                    subDirectory.Delete(true);
+                }
 
-			foreach (var prop in properties)
-			{
-				var value = prop.GetValue(stats);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
 
-				double numeric = Convert.ToDouble(value);
+        public static string ResolveImagePathFallback(string imagesDir, Guid id, string pathFromJson, string projectRoot)
+        {
+            // Prefer images/{guid}.*
+            if (Directory.Exists(imagesDir))
+            {
+                var pattern = id.ToString("D") + ".*";
+                var found = Directory.EnumerateFiles(imagesDir, pattern).FirstOrDefault();
+                if (found != null) return found;
+            }
 
-				if (numeric != 0.0)
-					return false;
-			}
+            // Otherwise use the JSON path (make absolute if relative)
+            var candidate = pathFromJson ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(candidate)) return candidate;
 
-			return true;
-		}
+            if (!Path.IsPathRooted(candidate))
+                candidate = Path.GetFullPath(Path.Combine(projectRoot, candidate));
 
-		public static void PrepareOutputDirectory(string dir)
-		{
-			try
-			{
-				if (Directory.Exists(dir))
-				{
-					// Delete files only — don’t nuke the folder structure
-					foreach (string file in Directory.EnumerateFiles(dir))
-					{
-						try
-						{
-							File.Delete(file);
-						}
-						catch (IOException ex)
-						{
-							Debug.WriteLine($"Could not delete {file}: {ex.Message}");
-						}
-					}
-				}
-				else
-				{
-					Directory.CreateDirectory(dir);
-				}
-			}
-			catch (Exception ex)
-			{
-				Debug.WriteLine($"Error preparing output directory: {ex.Message}");
-				throw;
-			}
-		}
+            return candidate;
+        }
 
-		public static int MapRangeStringToInt(string input, int fromMin, int fromMax, int toMin, int toMax)
-		{
-			if (!int.TryParse(input, out var value))
-			{
-				throw new ArgumentException("Invalid input string");
-			}
+        public static bool IsAllZero(SegmentationStats stats)
+        {
+            if (stats == null)
+                return true;
 
-			if (value < fromMin)
-				value = fromMin;
-			else if (value > fromMax)
-				value = fromMax;
+            var properties = typeof(SegmentationStats)
+                .GetProperties()
+                .Where(p => p.CanRead &&
+                            (p.PropertyType == typeof(int) || p.PropertyType == typeof(double)));
 
-			var normalized = (double)(value - fromMin) / (fromMax - fromMin);
-			var mapped = (int)(normalized * (toMax - toMin) + toMin);
+            foreach (var prop in properties)
+            {
+                var value = prop.GetValue(stats);
 
-			return mapped;
-		}
+                double numeric = Convert.ToDouble(value);
+
+                if (numeric != 0.0)
+                    return false;
+            }
+
+            return true;
+        }
+
+        public static void PrepareOutputDirectory(string dir)
+        {
+            try
+            {
+                if (Directory.Exists(dir))
+                {
+                    // Delete files only — don’t nuke the folder structure
+                    foreach (string file in Directory.EnumerateFiles(dir))
+                    {
+                        try
+                        {
+                            File.Delete(file);
+                        }
+                        catch (IOException ex)
+                        {
+                            Debug.WriteLine($"Could not delete {file}: {ex.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    Directory.CreateDirectory(dir);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error preparing output directory: {ex.Message}");
+                throw;
+            }
+        }
+
+        public static int MapRangeStringToInt(string input, int fromMin, int fromMax, int toMin, int toMax)
+        {
+            if (!int.TryParse(input, out var value))
+            {
+                throw new ArgumentException("Invalid input string");
+            }
+
+            if (value < fromMin)
+                value = fromMin;
+            else if (value > fromMax)
+                value = fromMax;
+
+            var normalized = (double)(value - fromMin) / (fromMax - fromMin);
+            var mapped = (int)(normalized * (toMax - toMin) + toMin);
+
+            return mapped;
+        }
 
         // Overkill to get GPU VRAM using ILGPU but I haven't found any simpler cross-platform way
         public static long GetCudaVRam()
         {
-			long ramSize = 0;
+            long ramSize = 0;
             var myContext = Context.CreateDefault();
             foreach (var device in Context.CreateDefault())
             {
@@ -209,27 +247,72 @@ namespace AnnotationTool.Core.Utils
             return ramSize;
         }
 
-		// ToDo: Is there a better way?
-		public static bool IsDarkMode()
-		{
-			try
-			{
-				var key = Registry.CurrentUser.OpenSubKey( @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        // ToDo: Is there a better way?
+        public static bool IsDarkMode()
+        {
+            try
+            {
+                var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
 
-				if (key == null)
-					return false;
+                if (key == null)
+                    return false;
 
-				object value = key.GetValue("AppsUseLightTheme");
-				if (value is int intValue)
-					return intValue == 0; // 0 = Dark mode
+                object value = key.GetValue("AppsUseLightTheme");
+                if (value is int intValue)
+                    return intValue == 0; // 0 = Dark mode
 
-				return false;
-			}
-			catch
-			{
-				return false;
-			}
-		}
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
-	}
+        public static string FindMatchingFolder(string parentFolder, string prefix, List<string> suffixes)
+        {
+            foreach (string suffix in suffixes)
+            {
+                string expectedFolderName = $"{prefix}_{suffix}";
+                string fullPath = Path.Combine(parentFolder, expectedFolderName);
+
+                if (Directory.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+            }
+
+            return null;
+        }
+
+        public static Dictionary<int, byte> BuildClassRemapByName(IReadOnlyList<Feature> oldFeatures, IReadOnlyList<Feature> newFeatures)
+        {
+            // New features by name
+            var newByName = newFeatures.ToDictionary(f => f.Name);
+
+            var remap = new Dictionary<int, byte>
+            {
+                [0] = 0 // background stays background
+            };
+
+            foreach (var oldF in oldFeatures)
+            {
+                Feature newF;
+                if (newByName.TryGetValue(oldF.Name, out newF))
+                {
+                    // Feature still exists
+                    remap[oldF.ClassId] = checked((byte)newF.ClassId);
+                }
+                else
+                {
+                    // Feature deleted → background
+                    remap[oldF.ClassId] = 0;
+                }
+            }
+
+            return remap;
+        }
+
+
+    }
 }

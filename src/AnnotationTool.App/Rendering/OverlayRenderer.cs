@@ -1,0 +1,234 @@
+﻿using AnnotationTool.Core.Interaction;
+using AnnotationTool.Core.Models;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+
+namespace AnnotationTool.App.Rendering
+{
+    /// <summary>
+    /// Stateless renderer + fast overlay updater.
+    ///
+    /// Responsibilities:
+    /// - Draw bitmaps in viewport space (no bitmap ownership)
+    /// - Draw ROI and UI overlays
+    /// - Incrementally update annotation overlay bitmap from LabelMask (dirty rect)
+    ///
+    /// IMPORTANT:
+    /// - Callers must synchronize bitmap access (AnnotationLock / HeatmapLock) if the bitmap
+    ///   can be LockBits()'d and DrawImage()'d concurrently.
+    /// - This class does NOT lock; it stays UI/framework agnostic.
+    /// </summary>
+    public sealed class OverlayRenderer
+    {
+
+        private readonly Font hudFont = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Pixel);
+
+
+        /// <summary>
+        /// Draw a bitmap in image space using the viewport transform.
+        /// This is for "image-space" bitmaps: FullImage, AnnotationOverlay, Heatmaps that match image size.
+        /// </summary>
+        public void DrawImage(Graphics g, Bitmap image, Viewport viewport)
+        {
+            if (image == null || g == null)
+                return;
+
+            var imgRect = viewport.ImageToScreenRect(new RectangleF(0, 0, image.Width, image.Height));
+
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            g.DrawImage(
+                image,
+                imgRect.X,
+                imgRect.Y,
+                imgRect.Width,
+                imgRect.Height);
+        }
+
+        /// <summary>
+        /// Draw ROI rectangle (in image coordinates) onto the screen.
+        /// </summary>
+        public void DrawRoi(Graphics g, RoiController roiController, Viewport viewport)
+        {
+            if (g == null | roiController == null)
+                return;
+
+            var roi = roiController.Roi;
+            var roiScreen = viewport.ImageToScreenRect(roi);
+
+            using (var pen = new Pen(Color.Red, 2f))
+            {
+                pen.Alignment = PenAlignment.Inset;
+                
+                g.DrawRectangle(
+                    pen,
+                    roiScreen.X,
+                    roiScreen.Y,
+                    roiScreen.Width,
+                    roiScreen.Height);
+            }
+        }
+
+        public void DrawBrushIndicator(Graphics g, RoiController roiController, Viewport viewport, PictureBox mainPictureBox, int currentBrushSize)
+        {
+            var roi = roiController.Roi;
+            var roiScreen = viewport.ImageToScreenRect(roi);
+
+            using (var pen = new Pen(Color.Blue, 4) { DashStyle = DashStyle.Solid })
+            {
+                g.DrawEllipse(
+                    pen,
+                    mainPictureBox.Width / 2 - currentBrushSize / 2,
+                    mainPictureBox.Height / 2 - currentBrushSize / 2,
+                    (int)(currentBrushSize * viewport.Zoom),
+                    (int)(currentBrushSize * viewport.Zoom));
+            }
+        }
+
+        /// <summary>
+        /// Optional: draw debug text in screen space.
+        /// </summary>
+        public void DrawText(Graphics g, string text, Point screenPos)
+        {
+            using (var font = new Font("Segoe UI", 9))
+            using (var brush = new SolidBrush(Color.White))
+            {
+                g.DrawString(text, font, brush, screenPos);
+            }
+        }
+
+
+        /// <summary>
+        /// Incrementally updates a rectangular region of an ARGB annotation overlay bitmap from the LabelMask.
+        ///
+        /// - overlay: Format32bppArgb bitmap (visual-only)
+        /// - mask: byte-per-pixel class ids (truth)
+        /// - classIdToColor: maps classId -> RGB color (background 0 should not exist or may map to transparent)
+        /// - imageRect: dirty region in IMAGE coordinates
+        /// - overlayAlpha: 0..255 alpha for non-background pixels
+        ///
+        /// IMPORTANT:
+        /// - Caller must hold the overlay's synchronization lock around calls to this method AND around drawing.
+        /// </summary>
+        public void UpdateAnnotationOverlayRegion(
+            Bitmap overlay,
+            LabelMask mask,
+            Dictionary<int, Color> featureColorMap,
+            Rectangle imageRect,
+            byte overlayAlpha)
+        {
+            if (overlay == null || imageRect.Width <= 0 || imageRect.Height <= 0)
+                return;
+
+            var data = overlay.LockBits(imageRect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+
+            try
+            {
+                unsafe
+                {
+                    byte* dstBase = (byte*)data.Scan0;
+                    int dstStride = data.Stride;
+
+                    for (int y = 0; y < imageRect.Height; y++)
+                    {
+                        int imgY = imageRect.Y + y;
+                        byte* dstRow = dstBase + y * dstStride;
+
+                        int maskRow = imgY * mask.Width;
+
+                        for (int x = 0; x < imageRect.Width; x++)
+                        {
+                            int imgX = imageRect.X + x;
+                            byte classId = mask.Data[maskRow + imgX];
+
+                            int i = x * 4;
+
+                            if (classId == 0 ||
+                                !featureColorMap.TryGetValue(classId, out var c))
+                            {
+                                // Background = fully transparent in visualization overlay
+                                dstRow[i + 0] = 0;
+                                dstRow[i + 1] = 0;
+                                dstRow[i + 2] = 0;
+                                dstRow[i + 3] = 0;
+                            }
+                            else
+                            {
+                                dstRow[i + 0] = c.B;
+                                dstRow[i + 1] = c.G;
+                                dstRow[i + 2] = c.R;
+                                dstRow[i + 3] = overlayAlpha;
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                overlay.UnlockBits(data);
+            }
+        }
+
+        /// <summary>
+        /// Draws a semi-transparent grayscale mask (e.g. prediction or label).
+        /// </summary>
+        public void DrawMask(Graphics g, Bitmap mask, Viewport viewport, float opacity = 0.5f)
+        {
+            if (mask == null)
+                return;
+
+            var rect = viewport.ImageToScreenRect(
+                new RectangleF(0, 0, mask.Width, mask.Height));
+
+            using (var attr = new ImageAttributes())
+            {
+                var matrix = new ColorMatrix
+                {
+                    Matrix33 = opacity
+                };
+
+                attr.SetColorMatrix(matrix);
+
+                g.DrawImage(
+                    mask,
+                    Rectangle.Round(rect),
+                    0,
+                    0,
+                    mask.Width,
+                    mask.Height,
+                    GraphicsUnit.Pixel,
+                    attr);
+            }
+        }
+
+     
+        // Draw feature size rectangle at top-left of the PictureBox
+        public void DrawSliceSizeRectangle(Graphics g, RoiController roiController, Viewport viewport, int sliceSize, int downSample)
+        {
+            var effectiveSize = sliceSize * (1 << downSample);
+            var roi = roiController.Roi;
+            var roiScreen = viewport.ImageToScreenRect(roi);
+            var screenRect = new Rectangle(10, 10, (int)(effectiveSize * viewport.Zoom), (int)(effectiveSize * viewport.Zoom));
+
+            using (var p = new Pen(Color.Green, 2))
+            {
+                g.DrawRectangle(p, screenRect);
+            }
+
+        }
+
+        /// <summary>
+        /// Draws a heatmap bitmap aligned with the image.
+        /// </summary>
+        public void DrawHeatmap(Graphics g, Bitmap heatmap, Viewport viewport, float opacity = 0.6f)
+        {
+            DrawMask(g, heatmap, viewport, opacity);
+        }
+
+        public void Dispose()
+        {
+            hudFont.Dispose();
+        }
+    }
+}

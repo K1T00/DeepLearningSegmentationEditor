@@ -40,7 +40,7 @@ endif()
 # LibTorch
 # ------------------------------------------------------------
 # IMPORTANT:
-# This must point to the LibTorch you downloaded:
+# This must point to the LibTorch downloaded:
 # libtorch-win-shared-with-deps-2.7.1+cu128
 #
 # You can override this on the command line if needed.

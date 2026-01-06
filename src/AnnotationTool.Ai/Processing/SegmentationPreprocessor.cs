@@ -1,0 +1,36 @@
+﻿using AnnotationTool.Ai.Geometry;
+using OpenCvSharp;
+using System;
+using static AnnotationTool.Ai.Utils.ImageProcessing.ImageUtils;
+
+namespace AnnotationTool.Ai.Processing
+{
+    /// <summary>
+    /// Executes the forward segmentation preprocessing pipeline:
+    ///
+    /// original → ROI → downsample → slice
+    ///
+    /// Symmetry with SegmentationPostprocessor.
+    /// </summary>
+    public sealed class SegmentationPreprocessor
+    {
+        private readonly SegmentationImageSpace space;
+
+        public SegmentationPreprocessor(SegmentationImageSpace space)
+        {
+            this.space = space ?? throw new ArgumentNullException(nameof(space));
+        }
+
+        /// <summary>
+        /// Preprocesses an input image/maskGt into tiles that should be converted to tensor and fed to the model.
+        /// </summary>
+        public Mat[] ProcessImage(Mat original)
+        {
+            using (var roi = space.ExtractRoi(original))
+            using (var down = DownSampleImage(roi, space.DownSample))
+            {
+                return SliceImage(down, space.SliceSize, space.BorderPadding, space.TileRows, space.TileCols);
+            }
+        }
+    }
+}

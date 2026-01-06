@@ -1,11 +1,11 @@
-# TorchSharp CUDA empty_cache on Windows (C++ + CMake + C#)
+# TorchSharp CUDA empty_cache on Windows (Cpp + CMake + C#)
 
 This document explains **from scratch** how to implement
 `torch.cuda.empty_cache()` for **TorchSharp on Windows**, using:
 
 - CMake
 - LibTorch
-- MSVC Build Tools (no Visual Studio IDE)
+- MSVC Build Tools
 - A tiny native C++ shim DLL
 - C# P/Invoke
 
@@ -29,7 +29,7 @@ and expose it via a C ABI, then call it from C#.
 
 ## 2. Required software
 
-### 2.1 Visual Studio 2022 C++ Build Tools (REQUIRED)
+### 2.1 Visual Studio 2022 C++ Build Tools
 
 CUDA 12.8 only supports **MSVC v143 (VS 2022)**.
 
@@ -41,17 +41,30 @@ During installation select:
 - ✔ MSVC v143 – VS 2022 C++ x64/x86 build tools
 - ✔ Windows 10/11 SDK
 
-Verify:
-cl
 
-### 2.2 CUDA Toolkit 12.8
+
+For older versions: 
+
+https://visualstudio.microsoft.com/de/downloads/
+
+scroll down -> "older downloads"
+
+https://visualstudio.microsoft.com/de/visual-cpp-build-tools/
+
+
+Verify:
+
+x64 Native Tools Command Prompt for VS 2022 -> command: cl
+
+### 2.2 CUDA Toolkit
 
 Download:
 https://developer.nvidia.com/cuda-12-8-0-download-archive
 
 Verify:
 
-nvcc --version
+x64 Native Tools Command Prompt for VS 2022 -> command: nvcc --version
+
 
 ### 2.3 CMake
 
@@ -60,27 +73,34 @@ https://cmake.org/download/
 
 Verify:
 
-cmake --version
+x64 Native Tools Command Prompt for VS 2022 -> command: cmake --version
 
 
-### 3. Download LibTorch (build-time only)
+### 2.4 LibTorch (build-time only)
 
 LibTorch is required only for headers and .lib files.
 
 e.g. 
 
-https://download.pytorch.org/libtorch/cu128/
+https://download.pytorch.org/libtorch/cu128/ e.g. for v12.8  
 
-### 4. Build the native DLL
 
-Open
-x64 Native Tools Command Prompt for VS 2022
+ -> libtorch-win-shared-with-deps-2.7.1%2Bcu128.zip / libtorch-win-shared-with-deps-2.7.1+cu128.zip e.g. for libtorch 2.7.1
+
+
+### 3. Build the native DLL
+
+open x64 Native Tools Command Prompt for VS 2022
+
+cd .. build folder
 
 rmdir /s /q build
+
 cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+
 cmake --build build
 
-Result
+Result:
 
 build\NativeTorchCudaOps.dll
 

@@ -15,6 +15,6 @@ namespace AnnotationTool.Ai.Models
         public bool UseChannelAttention { get; set; }
         public bool UseAttentionGates { get; set; }
         public bool UseSelfAttention { get; set; }
-        public ScalarType TrainPrecision { get; set; } = ScalarType.Float32;
+        public ScalarType TrainPrecision { get; set; }
     }
 }
