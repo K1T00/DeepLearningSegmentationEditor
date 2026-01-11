@@ -33,6 +33,8 @@ namespace AnnotationTool.App.Forms
 
         public async Task StartInferenceRun(IProjectPresenter projectPresenter, string selectedModelPath)
         {
+            var keepDeviceFromUi = projectPresenter.Project.Settings.TrainModelSettings.Device;
+
             progressBar.Style = ProgressBarStyle.Continuous;
             cts = new CancellationTokenSource();
             var progress = new Progress<int>(percent => progressBar.Value = percent);
@@ -40,6 +42,9 @@ namespace AnnotationTool.App.Forms
             try
             {
                 projectPresenter.UpdateTrainingSettings(projectOptionsService.ExtractMetadataFilePath(selectedModelPath));
+
+                projectPresenter.Project.Settings.TrainModelSettings.Device = keepDeviceFromUi;
+
 
                 await Task.Run(async () =>
                 {

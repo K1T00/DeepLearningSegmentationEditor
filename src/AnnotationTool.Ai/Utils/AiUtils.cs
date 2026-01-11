@@ -24,90 +24,36 @@ namespace AnnotationTool.Ai.Utils
             }
         }
 
-        /// <summary>
-        /// Estimate micro-batch size for U-Net training by summing approximate activation memory across encoder, bottleneck, and decoder.
-        /// </summary>
-        public static int EstimateBatchSize(
-            int imageWidth,
-            int imageHeight,
-            int channels,
-            long availableMemoryBytes,
-            int unetDepth,
-            int firstFilter,
-            ScalarType trainPrecision,
-            bool keepSkipBuffers,
-            double safetyFraction,
-            double bwdMultiplier)
+        public static int AdjustBatchSizeIfNecessary(int estimatedBatchSize, int datasetSize, int minBatchSize)
         {
-            if (imageWidth <= 0 || imageHeight <= 0 || channels <= 0 || availableMemoryBytes <= 0)
-                return 1;
+            if (estimatedBatchSize <= 0)
+                throw new ArgumentException("Estimated batch size must be > 0");
 
-            // bytes per element based on dtype
-            var bpe = 4;
-            if (trainPrecision == ScalarType.Float16 || trainPrecision == ScalarType.BFloat16)
-                bpe = 2;
+            if (datasetSize <= 0)
+                throw new ArgumentException("Dataset size must be > 0");
 
-            // ---- Sum activations per sample across the whole U-Net ----
-            var convAct = SumConvActivationsUNet(imageHeight, imageWidth, unetDepth, firstFilter, keepSkipBuffers);
+            // Never exceed dataset size
+            int batchSize = Math.Min(estimatedBatchSize, datasetSize);
 
-            // Account for backprop storage, BN/IN stats, workspace, etc.
-            var activationsBytesPerImage = convAct * bpe * bwdMultiplier;
+            // If everything fits in one batch, that's optimal
+            if (batchSize == datasetSize)
+                return batchSize;
 
-            // Leave headroom
-            var usable = availableMemoryBytes * safetyFraction;
+            // If the remaining batch would be too small, rebalance
+            int remainder = datasetSize % batchSize;
 
-            // Final estimate
-            var batch = (int)Math.Max(1.0, Math.Floor(usable / activationsBytesPerImage));
-
-            // Smoothing to nearby convenient numbers
-            if (batch >= 16)
-                batch -= batch % 4;
-            else if (batch >= 8)
-                batch -= batch % 2;
-
-            return Math.Max(1, batch);
-        }
-
-        private static double SumConvActivationsUNet(int h, int w, int unetDepth, int firstFilter, bool keepSkipBuffers)
-        {
-            var sum = 0.0;
-            var curH = h;
-            var curW = w;
-
-            // Encoder
-            for (var i = 0; i < unetDepth; i++)
+            if (remainder > 0 && remainder < minBatchSize)
             {
-                var outC = firstFilter << i; // firstFilter * 2^i
+                int balanced = datasetSize / 2;
 
-                // two conv outputs at this resolution
-                sum += 2.0 * curH * curW * outC;
+                // Make sure the new batch size still respects minBatchSize
+                if (balanced >= minBatchSize)
+                    return balanced;
 
-                // one skip buffer kept until decoder uses it
-                if (keepSkipBuffers)
-                    sum += 1.0 * curH * curW * outC;
-
-                // next level resolution halves
-                curH = Math.Max(1, (curH + 1) / 2);
-                curW = Math.Max(1, (curW + 1) / 2);
+                // Fallback: keep original batch size
+                // (better one small batch than destabilizing everything)
             }
-
-            // Bottleneck
-            {
-                var outC = firstFilter << unetDepth;
-                sum += 2.0 * curH * curW * outC;
-            }
-
-            // Decoder (mirror)
-            for (var i = unetDepth - 1; i >= 0; i--)
-            {
-                curH = curH * 2;
-                curW = curW * 2;
-
-                var outC = firstFilter << i;
-                sum += 2.0 * curH * curW * outC;
-            }
-
-            return sum;
+            return batchSize;
         }
 
     }

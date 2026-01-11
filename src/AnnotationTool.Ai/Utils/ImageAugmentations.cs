@@ -1,6 +1,7 @@
 ﻿using AnnotationTool.Core.Models;
 using System;
 using System.Collections.Generic;
+using TorchSharp;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorComputations;
 using static TorchSharp.torch;
 using static TorchSharp.torchvision.transforms.functional;
@@ -25,9 +26,12 @@ namespace AnnotationTool.Ai.Utils
 
         public (Tensor image, Tensor mask) Apply(Tensor image, Tensor mask)
         {
-            foreach (var t in transforms)
-                (image, mask) = t.Apply(image, mask);
-            return (image, mask);
+            using (var scope = NewDisposeScope())
+            {
+                foreach (var t in transforms)
+                    (image, mask) = t.Apply(image, mask);
+                return (image.MoveToOuterDisposeScope(), mask.MoveToOuterDisposeScope());
+            }
         }
     }
 
@@ -135,10 +139,8 @@ namespace AnnotationTool.Ai.Utils
             var sy = (float)((rng.NextDouble() * 2 - 1) * shearY);
 
             // --- apply to both image and mask ---
-            image = SafeAffine(image, angle, new int[] { tx, ty }, scale, new float[] { sx, sy },
-                InterpolationMode.Bilinear, 0);
-            mask = SafeAffine(mask, angle, new int[] { tx, ty }, scale, new float[] { sx, sy },
-                InterpolationMode.Bilinear, 0);
+            image = SafeAffine(image, angle, new int[] { tx, ty }, scale, new float[] { sx, sy }, InterpolationMode.Bilinear);
+            mask = SafeAffine(mask, angle, new int[] { tx, ty }, scale, new float[] { sx, sy }, InterpolationMode.Bilinear);
 
             return (image, mask);
         }

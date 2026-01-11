@@ -1,4 +1,5 @@
-﻿using OpenCvSharp;
+﻿using AnnotationTool.Core.Models;
+using OpenCvSharp;
 using System;
 using static TorchSharp.torch;
 using static TorchSharp.torch.nn;
@@ -126,6 +127,137 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
                 }
             }
             return img;
+        }
+
+        // Tensor of [H x W] expected (normalized)
+        public static unsafe Mat NormalizedTensorToGreyImage(Tensor tens, NormalizationSettings norm)
+        {
+            if (tens.Dimensions != 2)
+                throw new ArgumentException("Tensor must have shape [H, W]");
+
+            // Ensure CPU + float32 + contiguous
+            using (var cpuTensor = tens
+                .to_type(ScalarType.Float32)
+                .cpu()
+                .contiguous())
+            {
+                int h = (int)cpuTensor.shape[0];
+                int w = (int)cpuTensor.shape[1];
+                int count = h * w;
+
+                float mean = norm.Mean[0];
+                float std = norm.Std[0];
+
+                float[] src = cpuTensor.data<float>().ToArray();
+
+                Mat img = new Mat(h, w, MatType.CV_8UC1);
+
+                byte* dst = (byte*)img.DataPointer;
+
+
+
+                int stride = (int)img.Step();
+
+                fixed (float* pSrc = src)
+                {
+                    float* p = pSrc;
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        byte* row = dst + y * stride;
+
+                        for (int x = 0; x < w; x++)
+                        {
+                            // De-normalize
+                            float v = (*p++ * std + mean) * 255f;
+
+                            // Manual clamp (netstandard2.0-safe)
+                            if (v < 0f) v = 0f;
+                            else if (v > 255f) v = 255f;
+
+                            row[x] = (byte)v;
+                        }
+                    }
+                }
+
+                return img;
+            }
+        }
+
+
+        public static unsafe Mat NormalizedTensorToRgbMat(Tensor tensor, NormalizationSettings norm)
+        {
+            if (tensor.Dimensions != 3 || tensor.shape[0] != 3)
+                throw new ArgumentException("Tensor must have shape [3, H, W]");
+
+            // Ensure CPU + float32 + contiguous memory
+            using (var cpuTensor = tensor
+                .to_type(ScalarType.Float32)
+                .cpu()
+                .contiguous())
+            {
+                int h = (int)cpuTensor.shape[1];
+                int w = (int)cpuTensor.shape[2];
+                int count = h * w;
+
+                // Extract tensor data
+                float[] buffer = cpuTensor.data<float>().ToArray();
+
+                int rOffset = 0;
+                int gOffset = count;
+                int bOffset = count * 2;
+
+                float meanR = norm.Mean[0];
+                float meanG = norm.Mean[1];
+                float meanB = norm.Mean[2];
+
+                float stdR = norm.Std[0];
+                float stdG = norm.Std[1];
+                float stdB = norm.Std[2];
+
+                Mat mat = new Mat(h, w, MatType.CV_8UC3);
+
+                byte* dstBase = (byte*)mat.DataPointer;
+                int rowStride = w * 3;
+
+                fixed (float* src = buffer)
+                {
+                    float* rPtr = src + rOffset;
+                    float* gPtr = src + gOffset;
+                    float* bPtr = src + bOffset;
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        byte* row = dstBase + y * rowStride;
+
+                        for (int x = 0; x < w; x++)
+                        {
+                            float r = (*rPtr++ * stdR + meanR) * 255f;
+                            float g = (*gPtr++ * stdG + meanG) * 255f;
+                            float b = (*bPtr++ * stdB + meanB) * 255f;
+
+                            // Manual clamp (no Math.Clamp in netstandard2.0)
+                            if (r < 0f) r = 0f;
+                            else if (r > 255f) r = 255f;
+
+                            if (g < 0f) g = 0f;
+                            else if (g > 255f) g = 255f;
+
+                            if (b < 0f) b = 0f;
+                            else if (b > 255f) b = 255f;
+
+                            int i = x * 3;
+
+                            // OpenCV uses BGR order
+                            row[i] = (byte)b;
+                            row[i + 1] = (byte)g;
+                            row[i + 2] = (byte)r;
+                        }
+                    }
+                }
+
+                return mat;
+            }
         }
 
         public static Mat[] ClassIndexTensorToImages(Tensor t)

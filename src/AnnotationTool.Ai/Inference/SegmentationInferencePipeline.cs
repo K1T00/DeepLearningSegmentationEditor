@@ -69,7 +69,6 @@ namespace AnnotationTool.Ai.Inference
                 {
                     model.load(modelPath).to(cfg.TrainPrecision, true).eval();
 
-                    using (var d = NewDisposeScope())
                     using (var decoder = CreateDecoder(segmentationMode, project, device.type))
                     using (var inference = inference_mode())
                     {
@@ -79,89 +78,92 @@ namespace AnnotationTool.Ai.Inference
 
                         foreach (var img in project.Project.Images)
                         {
-                            ct.ThrowIfCancellationRequested();
-
-                            var imgSpace = new SegmentationImageSpace(
-                                new OpenCvSharp.Size(img.ImageSize.Width, img.ImageSize.Height),
-                                new OpenCvSharp.Rect(img.Roi.X, img.Roi.Y, img.Roi.Width, img.Roi.Height),
-                                project.Project.Settings.PreprocessingSettings.SliceSize,
-                                project.Project.Settings.PreprocessingSettings.DownSample,
-                                project.Project.Settings.PreprocessingSettings.BorderPadding);
-
-                            var preProc = new SegmentationPreprocessor(imgSpace);
-                            var postProc = new SegmentationPostprocessor(imgSpace);
-
-                            using (var image = LoadImage(img.Path, project))
-                            using (var maskGt = Cv2.ImRead(img.MaskPath, ImreadModes.Grayscale))
+                            using (var d = NewDisposeScope())
                             {
-                                var sw = Stopwatch.StartNew();
+                                ct.ThrowIfCancellationRequested();
 
-                                var imgTiles = preProc.ProcessImage(image);
+                                var imgSpace = new SegmentationImageSpace(
+                                    new OpenCvSharp.Size(img.ImageSize.Width, img.ImageSize.Height),
+                                    new OpenCvSharp.Rect(img.Roi.X, img.Roi.Y, img.Roi.Width, img.Roi.Height),
+                                    project.Project.Settings.PreprocessingSettings.SliceSize,
+                                    project.Project.Settings.PreprocessingSettings.DownSample,
+                                    project.Project.Settings.PreprocessingSettings.BorderPadding);
 
-                                // Tensor conversion + forward
-                                var inputTensor = SlicedImageToTensor(
-                                    imgTiles,
-                                    project.Project.Settings.PreprocessingSettings.TrainAsGreyscale,
-                                    device,
-                                    project.Project.Settings.PreprocessingSettings.Normalization,
-                                    cfg.TrainPrecision);
+                                var preProc = new SegmentationPreprocessor(imgSpace);
+                                var postProc = new SegmentationPostprocessor(imgSpace);
 
-                                var logits = model.call(inputTensor);
-                                var predTilesDic = decoder.Decode(logits);
-
-                                var fullMaskPredictions = new Dictionary<int, Mat>();
-                                foreach (var predTiles in predTilesDic)
+                                using (var image = LoadImage(img.Path, project))
+                                using (var maskGt = Cv2.ImRead(img.MaskPath, ImreadModes.Grayscale))
                                 {
-                                    fullMaskPredictions.Add(predTiles.Key, postProc.ProcessImageTiles(predTiles.Value));
+                                    var sw = Stopwatch.StartNew();
+
+                                    var imgTiles = preProc.ProcessImage(image);
+
+                                    // Tensor conversion + forward
+                                    var inputTensor = SlicedImageToTensor(
+                                        imgTiles,
+                                        project.Project.Settings.PreprocessingSettings.TrainAsGreyscale,
+                                        device,
+                                        project.Project.Settings.PreprocessingSettings.Normalization,
+                                        cfg.TrainPrecision);
+
+                                    var logits = model.call(inputTensor);
+                                    var predTilesDic = decoder.Decode(logits);
+
+                                    var fullMaskPredictions = new Dictionary<int, Mat>();
+                                    foreach (var predTiles in predTilesDic)
+                                    {
+                                        fullMaskPredictions.Add(predTiles.Key, postProc.ProcessImageTiles(predTiles.Value));
+                                    }
+                                    sw.Stop();
+
+
+                                    //Visualization
+                                    foreach (var kv in fullMaskPredictions)
+                                    {
+                                        // Create visualization
+                                        var (heatmap, overlay) =
+                                            ImageToHeatmap(
+                                                image,
+                                                kv.Value[0, image.Height, 0, image.Width],
+                                                project.Project.Settings.HeatmapThreshold);
+                                        try
+                                        {
+                                            var subDirHeatmap = Path.Combine(heatmapImagesPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                            var subDirOverlay = Path.Combine(heatmapOverlaysPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                            Directory.CreateDirectory(subDirHeatmap);
+                                            Directory.CreateDirectory(subDirOverlay);
+                                            Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + ".png"), heatmap);
+                                            Cv2.ImWrite(Path.Combine(subDirOverlay, img.Guid + ".png"), overlay);
+                                        }
+                                        finally
+                                        {
+                                            heatmap.Dispose();
+                                            overlay.Dispose();
+                                        }
+                                    }
+
+                                    // Segmentation stats
+                                    img.SegmentationStats = decoder.ComputeMetrics(fullMaskPredictions, maskGt);
+
+                                    img.InferenceMs = sw.Elapsed.TotalMilliseconds;
+
+                                    DisposeTiles(imgTiles);
+                                    DisposePred(fullMaskPredictions);
+                                    DisposePreds(predTilesDic);
                                 }
-                                sw.Stop();
+                                imgIndex++;
+                                progress.Report(imgIndex == project.Project.Images.Count ? 100 : (int)(100.0 / project.Project.Images.Count * imgIndex));
 
-
-                                //Visualization
-                                foreach (var kv in fullMaskPredictions)
+                                if (device.type == DeviceType.CUDA)
                                 {
-                                    // Create visualization
-                                    var (heatmap, overlay) =
-                                        ImageToHeatmap(
-                                            image,
-                                            kv.Value[0, image.Height, 0, image.Width],
-                                            project.Project.Settings.HeatmapThreshold);
-                                    try
-                                    {
-                                        var subDirHeatmap = Path.Combine(heatmapImagesPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
-                                        var subDirOverlay = Path.Combine(heatmapOverlaysPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
-                                        Directory.CreateDirectory(subDirHeatmap);
-                                        Directory.CreateDirectory(subDirOverlay);
-                                        Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + ".png"), heatmap);
-                                        Cv2.ImWrite(Path.Combine(subDirOverlay, img.Guid + ".png"), overlay);
-                                    }
-                                    finally
-                                    {
-                                        heatmap.Dispose();
-                                        overlay.Dispose();
-                                    }
+                                    NativeTorchCudaOps.EmptyCudaCache();
                                 }
 
-                                // Segmentation stats
-                                img.SegmentationStats = decoder.ComputeMetrics(fullMaskPredictions, maskGt);
-
-                                img.InferenceMs = sw.Elapsed.TotalMilliseconds;
-
-                                DisposeTiles(imgTiles);
-                                DisposePred(fullMaskPredictions);
-                                DisposePreds(predTilesDic);
-                            }
-                            imgIndex++;
-                            progress.Report(imgIndex == project.Project.Images.Count ? 100 : (int)(100.0 / project.Project.Images.Count * imgIndex));
-
-                            if (device.type == DeviceType.CUDA)
-                            {
-                                NativeTorchCudaOps.EmptyCudaCache();
-                            }
-
-                            if (ct.IsCancellationRequested)
-                            {
-                                break;
+                                if (ct.IsCancellationRequested)
+                                {
+                                    break;
+                                }
                             }
                         }
                     }

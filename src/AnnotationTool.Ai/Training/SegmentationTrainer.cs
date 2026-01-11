@@ -80,8 +80,6 @@ namespace AnnotationTool.Ai.Training
             using (var d = NewDisposeScope())
             using (var useGrad = enable_grad())
             {
-                //using var inferenceMode = inference_mode(false);
-
                 foreach (var batch in ctx.TrainLoader)
                 {
                     // Execute model

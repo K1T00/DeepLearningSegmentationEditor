@@ -117,47 +117,27 @@ namespace AnnotationTool.Ai.Training
                     project.Project.GpuMemoryBudgetBytes :
                     project.Project.CpuMemoryBudgetBytes;
 
-            var saveFraction =
-                project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Gpu ?
-                0.65 :
-                0.35;
+            // Note: Batch size variation (450+50 -> 250+250) does not skew results significantly, so we use a fixed optimizer type for estimation
+            // But BatchNorm2d should be used with a minimum batch size
+            const int MinBatchForBatchNorm = 8;
 
             var batchSize = EstimateBatchSize(
+                cfg,
                 project.Project.Settings.PreprocessingSettings.SliceSize,
                 project.Project.Settings.PreprocessingSettings.SliceSize,
                 project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3,
                 availableMemory,
-                cfg.Depth,
-                cfg.FirstFilter,
-                cfg.TrainPrecision,
-                true,
-                saveFraction,
-                3.0
-                );
-
-
-            //var batchSize = EstimateBatchSize(
-            //	project.Project.Settings.PreprocessingSettings.SliceSize,
-            //	project.Project.Settings.PreprocessingSettings.SliceSize,
-            //	project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3,
-            //	availableMemory,
-            //	cfg.Depth,
-            //	cfg.FirstFilter,
-            //  project.Project.Settings.TrainModelSettings.Device,
-            //  cfg.TrainPrecision,
-            //  true,
-            //	cfg.UsePooling,
-            //	cfg.UseStridedConv,
-            //	cfg.UseInterpolationDown,
-            //	cfg.UseInterpolationUp,
-            //	cfg.UseChannelAttention,
-            //	cfg.UseAttentionGates,
-            //	cfg.UseSelfAttention);
-
+                project.Project.Settings.TrainModelSettings.Device,
+                OptimizerType.SGD);
 
             var augmentations = ImageAugmentations.BuildAugmentations(project.Project.Settings.AugmentationSettings);
             var trainPairs = project.GetSlicedTrainingPairs(DatasetSplit.Train);
             var valPairs = project.GetSlicedTrainingPairs(DatasetSplit.Validate);
+
+            if (!cfg.UseInstanceNorm)
+            {
+                batchSize = AdjustBatchSizeIfNecessary(batchSize, trainPairs.Count, MinBatchForBatchNorm);
+            }
 
             Dataset finalTrainDataset = null;
             var validationDataSet = new SegmentationDataset(valPairs, project, device, augmentations, cfg);

@@ -11,45 +11,46 @@ namespace AnnotationTool.Ai.Utils
     {
         public static SegmentationStats ComputeBinaryMetrics(Mat predicted, Mat groundTruth)
         {
-            var intersection = new Mat();
-            var predBin = Binarize(predicted);
-            var gtBin = Binarize(groundTruth);
+            using (var predBin = Binarize(predicted))
+            using (var gtBin = Binarize(groundTruth))
+            using (var intersection = new Mat())
+            using (var union = new Mat())
+            using (var predOnly = new Mat())
+            using (var missed = new Mat())
+            {
+                Cv2.BitwiseAnd(predBin, gtBin, intersection);
+                Cv2.BitwiseOr(predBin, gtBin, union);
 
-            Cv2.BitwiseAnd(predBin, gtBin, intersection);
+                double TP = Cv2.CountNonZero(intersection);
 
-            var union = new Mat();
-            Cv2.BitwiseOr(predBin, gtBin, union);
+                Cv2.BitwiseAnd(predBin, ~gtBin, predOnly);
+                double FP = Cv2.CountNonZero(predOnly);
 
-            double TP = Cv2.CountNonZero(intersection);
+                Cv2.BitwiseAnd(~predBin, gtBin, missed);
+                double FN = Cv2.CountNonZero(missed);
 
-            var predOnly = new Mat();
-            Cv2.BitwiseAnd(predBin, ~gtBin, predOnly);
-            double FP = Cv2.CountNonZero(predOnly);
+                double total = predBin.Rows * predBin.Cols;
+                var TN = total - TP - FP - FN;
 
-            var missed = new Mat();
-            Cv2.BitwiseAnd(~predBin, gtBin, missed);
-            double FN = Cv2.CountNonZero(missed);
+                // Add small epsilon to denominators to avoid division by zero
+                const double epsilon = 1e-8;
 
-            double total = predBin.Rows * predBin.Cols;
-            var TN = total - TP - FP - FN;
+                return new SegmentationStats
+                {
+                    TP = (int)TP,
+                    FP = (int)FP,
+                    FN = (int)FN,
+                    TN = (int)TN,
 
-            var stats = new SegmentationStats();
-            stats.TP = (int)TP;
-            stats.FP = (int)FP;
-            stats.FN = (int)FN;
-            stats.TN = (int)TN;
-
-            // Add small epsilon to denominators to avoid division by zero
-            const double epsilon = 1e-8;
-            stats.IoU = TP / (TP + FP + FN + epsilon);
-            stats.Dice = (2 * TP) / (2 * TP + FP + FN + epsilon);
-            stats.Precision = TP / (TP + FP + epsilon);
-            stats.Recall = TP / (TP + FN + epsilon);
-            stats.Accuracy = (TP + TN) / (TP + TN + FP + FN + epsilon);
-            stats.FPR = FP / (FP + TN + epsilon);
-            stats.Specificity = TN / (TN + FP + epsilon);
-
-            return stats;
+                    IoU = TP / (TP + FP + FN + epsilon),
+                    Dice = (2 * TP) / (2 * TP + FP + FN + epsilon),
+                    Precision = TP / (TP + FP + epsilon),
+                    Recall = TP / (TP + FN + epsilon),
+                    Accuracy = (TP + TN) / (TP + TN + FP + FN + epsilon),
+                    FPR = FP / (FP + TN + epsilon),
+                    Specificity = TN / (TN + FP + epsilon)
+                };
+            }
         }
 
         /// <summary>
