@@ -197,6 +197,8 @@ namespace AnnotationTool.App
 
         private void DeepLearningSettingsControl_SettingsChanged(object? sender, EventArgs e)
         {
+            // Force reset so user can run same model again
+            currentSelectedModelFileName = "";
             mainPictureBox.Invalidate();
         }
 
@@ -483,7 +485,7 @@ namespace AnnotationTool.App
                     imagesControl.UpdateCategory(newAddedImageItem.Guid, DatasetSplit.Train);
                     newAddedImageItem.Roi = new Rectangle(0, 0, newAddedImageItem.ImageSize.Width, newAddedImageItem.ImageSize.Height);
                 }
-
+                // Force reset so user can run same model again
                 currentSelectedModelFileName = "";
 
                 imagesControl.Refresh();

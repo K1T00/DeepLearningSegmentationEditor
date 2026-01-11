@@ -68,22 +68,25 @@ namespace AnnotationTool.Ai.Utils
         /// <returns></returns>
         public static Tensor ComputeDiceWithBceLossBin(Tensor prediction, Tensor target, float smooth = 1e-6f)
         {
-            // Convert logits to probabilities
-            var prob = prediction.sigmoid();
-            var bceLoss = functional.binary_cross_entropy_with_logits(prediction, target); // Result is scalar
+            using (var scope = NewDisposeScope())
+            {
+                // Convert logits to probabilities
+                var prob = prediction.sigmoid();
+                var bceLoss = functional.binary_cross_entropy_with_logits(prediction, target); // Result is scalar
 
-            // Flatten
-            var predFlat = prob.flatten(start_dim: 1).to_type(ScalarType.Float32);
-            var targetFlat = target.flatten(start_dim: 1).to_type(ScalarType.Float32);
+                // Flatten
+                var predFlat = prob.flatten(start_dim: 1).to_type(ScalarType.Float32);
+                var targetFlat = target.flatten(start_dim: 1).to_type(ScalarType.Float32);
 
-            // Compute intersection and union
-            var intersection = (predFlat * targetFlat).sum();
-            var sum = predFlat.sum() + targetFlat.sum();
+                // Compute intersection and union
+                var intersection = (predFlat * targetFlat).sum();
+                var sum = predFlat.sum() + targetFlat.sum();
 
-            var diceCoeff = (2 * intersection + smooth) / (sum + smooth);
-            var diceLoss = 1 - diceCoeff;
+                var diceCoeff = (2 * intersection + smooth) / (sum + smooth);
+                var diceLoss = 1 - diceCoeff;
 
-            return diceLoss + bceLoss;
+                return (diceLoss + bceLoss).MoveToOuterDisposeScope();
+            }
         }
 
         /// <summary>
@@ -351,36 +354,39 @@ namespace AnnotationTool.Ai.Utils
         /// <returns></returns>
         public static Tensor DiceCrossEntropyLoss(Tensor pred, Tensor target, float smooth = 1e-6f)
         {
-            // pred: [B, C, H, W] - raw logits
-            // target: [B, H, W] - class indices
+            using (var scope = NewDisposeScope())
+            {
+                // pred: [B, C, H, W] - raw logits
+                // target: [B, H, W] - class indices
 
-            var numClasses = pred.shape[1];
+                var numClasses = pred.shape[1];
 
-            // Compute cross-entropy loss (built-in)
-            var ceLoss = functional.cross_entropy(pred, target);
+                // Compute cross-entropy loss (built-in)
+                var ceLoss = functional.cross_entropy(pred, target);
 
-            // Convert target to one-hot: [B, C, H, W]
-            // Error if target has values outside [0, numClasses-1] usually in the masks
-            var targetOneHot = functional.one_hot(target, numClasses) // shape: [B, H, W, C]
-                .permute(0, 3, 1, 2) // to [B, C, H, W]
-                .to_type(pred.dtype); // match dtype
+                // Convert target to one-hot: [B, C, H, W]
+                // Error if target has values outside [0, numClasses-1] usually in the masks
+                var targetOneHot = functional.one_hot(target, numClasses) // shape: [B, H, W, C]
+                    .permute(0, 3, 1, 2) // to [B, C, H, W]
+                    .to_type(pred.dtype); // match dtype
 
-            // Apply softmax to get class probabilities
-            var probs = pred.softmax(1); // [B, C, H, W]
+                // Apply softmax to get class probabilities
+                var probs = pred.softmax(1); // [B, C, H, W]
 
-            // Flatten for Dice calculation: [B, C, H*W]
-            var probsFlat = probs.flatten(start_dim: 2);
-            var targetFlat = targetOneHot.flatten(start_dim: 2);
+                // Flatten for Dice calculation: [B, C, H*W]
+                var probsFlat = probs.flatten(start_dim: 2);
+                var targetFlat = targetOneHot.flatten(start_dim: 2);
 
-            // Compute per-class Dice
-            var intersection = (probsFlat * targetFlat).sum(dim: 2);     // [B, C]
-            var total = probsFlat.sum(dim: 2) + targetFlat.sum(dim: 2);  // [B, C]
+                // Compute per-class Dice
+                var intersection = (probsFlat * targetFlat).sum(dim: 2);     // [B, C]
+                var total = probsFlat.sum(dim: 2) + targetFlat.sum(dim: 2);  // [B, C]
 
-            var dice = (2 * intersection + smooth) / (total + smooth);   // [B, C]
-            var diceLoss = 1 - dice.mean();  // scalar
+                var dice = (2 * intersection + smooth) / (total + smooth);   // [B, C]
+                var diceLoss = 1 - dice.mean();  // scalar
 
-            // Combine losses
-            return ceLoss + diceLoss;
+                // Combine losses
+                return (ceLoss + diceLoss).MoveToOuterDisposeScope();
+            }
         }
 
         #endregion

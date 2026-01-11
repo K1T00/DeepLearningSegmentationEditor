@@ -10,20 +10,14 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
     public static class TensorConversion
     {
 
-        public static unsafe Tensor RgbMatToNormalizedTensor(Mat image, Device device, ScalarType precision, NormalizationSettings norm)
+        public static unsafe Tensor RgbMatToNormalizedTensor(Mat image, Device device, ScalarType dtype, NormalizationSettings norm)
         {
+            if (image.Type() != MatType.CV_8UC3)
+                throw new ArgumentException("Expected CV_8UC3 Mat");
+
             int h = image.Rows;
             int w = image.Cols;
             int count = h * w;
-
-            // Allocate buffer: [R | G | B]
-            float[] buffer = new float[count * 3];
-
-            int rOff = 0;
-            int gOff = count;
-            int bOff = count * 2;
-
-            const float inv255 = 1f / 255f;
 
             float meanR = norm.Mean[0];
             float meanG = norm.Mean[1];
@@ -33,41 +27,48 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
             float invStdG = 1f / norm.Std[1];
             float invStdB = 1f / norm.Std[2];
 
-            // Get pointer to raw Mat data (BGRBGRBGR…)
-            byte* src = (byte*)image.DataPointer;
+            float inv255 = 1f / 255f;
+
+            // Allocate managed buffer: [R | G | B] planes
+            float[] buffer = new float[count * 3];
+
+            byte* srcBase = (byte*)image.DataPointer;
+
+            // Use OpenCV row stride
+            int stride = (int)image.Step();
 
             fixed (float* dst = buffer)
             {
-                float* rPtr = dst + rOff;
-                float* gPtr = dst + gOff;
-                float* bPtr = dst + bOff;
-
-                int stride = w * 3; // 3 bytes per pixel
+                float* rPtr = dst;
+                float* gPtr = dst + count;
+                float* bPtr = dst + count * 2;
 
                 for (int y = 0; y < h; y++)
                 {
-                    byte* row = src + y * stride;
+                    byte* row = srcBase + y * stride;
 
                     for (int x = 0; x < w; x++)
                     {
                         int i = x * 3;
 
-                        // Load BGR pixel
+                        // OpenCV is BGR
                         float vb = row[i] * inv255;
                         float vg = row[i + 1] * inv255;
                         float vr = row[i + 2] * inv255;
 
-                        // Store normalized channels
                         *rPtr++ = (vr - meanR) * invStdR;
                         *gPtr++ = (vg - meanG) * invStdG;
                         *bPtr++ = (vb - meanB) * invStdB;
                     }
                 }
             }
-            // Create tensor [3, H, W]
-            return torch.tensor(buffer, dtype: precision, device: device)
-                         .reshape(3, h, w);
+            using (var scope = NewDisposeScope())
+            {
+                // Create tensor [3, H, W]
+                return tensor(buffer, dtype: dtype).reshape(3, h, w).to(device).MoveToOuterDisposeScope();
+            }
         }
+
 
         public static unsafe Tensor GreyMatToNormalizedTensor(Mat image, Device device, ScalarType precision, NormalizationSettings norm)
         {
@@ -104,7 +105,11 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
                     }
                 }
             }
-            return torch.tensor(buffer, dtype: precision, device: device).reshape(1, h, w);
+
+            using (var scope = NewDisposeScope())
+            {
+                return tensor(buffer, dtype: precision, device: device).reshape(1, h, w).MoveToOuterDisposeScope();
+            }
         }
 
         // Each pixel is either 0 or 1: Bernoulli probability: p(y = 1) ∈ {0.0, 1.0}
@@ -139,8 +144,11 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
                     }
                 }
             }
-            // [1, H, W]
-            return torch.tensor(buffer, dtype: ScalarType.Float32, device: device).reshape(1, h, w);
+            using (var scope = NewDisposeScope())
+            {
+                // [1, H, W]
+                return tensor(buffer, dtype: ScalarType.Float32, device: device).reshape(1, h, w).MoveToOuterDisposeScope();
+            }
         }
 
         // Each pixel is class index: Categorical decision: class_id ∈ {0, 1, 2, …, C−1}
@@ -175,8 +183,11 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
                     }
                 }
             }
-            // [H, W]
-            return torch.tensor(buffer, ScalarType.Int64, device: device).reshape(h, w);
+            using (var scope = NewDisposeScope())
+            {
+                // [H, W]
+                return tensor(buffer, ScalarType.Int64, device: device).reshape(h, w).MoveToOuterDisposeScope();
+            }
         }
 
         // Tensor of [A x B x H x W] to tensor of [A][B][H x W]
@@ -185,49 +196,55 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
             if (tens.Dimensions != 4)
                 throw new ArgumentException("Tensor must have shape [A, B, H, W]");
 
-            long A = tens.shape[0];
-            long B = tens.shape[1];
-
-            Tensor[][] result = new Tensor[A][];
-
-            for (int a = 0; a < A; a++)
+            using (var scope = NewDisposeScope())
             {
-                result[a] = new Tensor[B];
+                long A = tens.shape[0];
+                long B = tens.shape[1];
 
-                Tensor sliceA = tens[a]; // [B, H, W]
+                Tensor[][] result = new Tensor[A][];
 
-                for (int b = 0; b < B; b++)
+                for (int a = 0; a < A; a++)
                 {
-                    result[a][b] = sliceA[b].contiguous(); // [H, W]
+                    result[a] = new Tensor[B];
+
+                    Tensor sliceA = tens[a]; // [B, H, W]
+
+                    for (int b = 0; b < B; b++)
+                    {
+                        result[a][b] = sliceA[b].contiguous().MoveToOuterDisposeScope(); // [H, W]
+                    }
                 }
+                return result;
             }
-            return result;
         }
 
         // Images[] -> Tensor:[Images.Length x 1 x Images.Width x Images.Height]
         public static Tensor SlicedImageToTensor(Mat[] images, bool trainImagesAsGreyscale, Device toDevice, NormalizationSettings norm, ScalarType precision)
         {
-            int N = images.Length;
-
-            // No parallel tasks needed here.
-            Tensor[] outputs = new Tensor[N];
-
-            for (int i = 0; i < N; i++)
+            using (var scope = NewDisposeScope())
             {
-                if (trainImagesAsGreyscale)
-                {
-                    // shape: [1, H, W]
-                    outputs[i] = GreyMatToNormalizedTensor(images[i], toDevice, precision, norm).unsqueeze(0);
-                }
-                else
-                {
-                    // shape: [3, H, W]
-                    outputs[i] = RgbMatToNormalizedTensor(images[i], toDevice, precision, norm).unsqueeze(0);
-                }
-            }
+                var N = images.Length;
 
-            // Stack along batch dimension → [N, C, H, W]
-            return torch.cat(outputs, 0);
+                // No parallel tasks needed here.
+                Tensor[] outputs = new Tensor[N];
+
+                for (int i = 0; i < N; i++)
+                {
+                    if (trainImagesAsGreyscale)
+                    {
+                        // shape: [1, H, W]
+                        outputs[i] = GreyMatToNormalizedTensor(images[i], toDevice, precision, norm).unsqueeze(0);
+                    }
+                    else
+                    {
+                        // shape: [3, H, W]
+                        outputs[i] = RgbMatToNormalizedTensor(images[i], toDevice, precision, norm).unsqueeze(0);
+                    }
+                }
+
+                // Stack along batch dimension → [N, C, H, W]
+                return cat(outputs, 0).MoveToOuterDisposeScope();
+            }
         }
 
         // Result prediction tensor is always of type grey and needs to be converted back to an image

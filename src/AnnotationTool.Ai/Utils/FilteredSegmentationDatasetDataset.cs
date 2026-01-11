@@ -2,6 +2,7 @@
 using AnnotationTool.Core.Services;
 using OpenCvSharp;
 using System.Collections.Generic;
+using TorchSharp;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageAnalysis;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
 using static TorchSharp.torch;
@@ -100,19 +101,23 @@ namespace AnnotationTool.Ai.Utils
         /// <returns>Tensors of index.</returns>
         public override Dictionary<string, Tensor> GetTensor(long index)
         {
-            var image = data[(int)index];
-            var mask = masks[(int)index];
-
-            if (transforms != null)
+            using (var scope = torch.NewDisposeScope())
             {
-                (image, mask) = transforms.Apply(image, mask);
+                var image = data[(int)index];
+                var mask = masks[(int)index];
+
+                if (transforms != null)
+                {
+                    var result = transforms.Apply(image, mask);
+                    image = result.image;
+                    mask = result.mask;
+                }
+
+                return new Dictionary<string, Tensor>{
+                    { "data", image.MoveToOuterDisposeScope() },
+                    { "masks", mask.MoveToOuterDisposeScope() }
+                };
             }
-
-            return new Dictionary<string, Tensor>
-            {
-                { "data", image },
-                { "masks", mask }
-            };
         }
 
         public override long Count => count;

@@ -1,5 +1,4 @@
-﻿using AnnotationTool.Ai.Models;
-using AnnotationTool.Ai.Training;
+﻿using AnnotationTool.Ai.Training;
 using AnnotationTool.Core.IO;
 using AnnotationTool.Core.Logging;
 using AnnotationTool.Core.Models;
@@ -17,18 +16,13 @@ namespace AnnotationTool.App.Forms
     public partial class TrainingForm : Form, ITrainingLogBridge
     {
         private readonly SegmentationTrainingPipeline pipeline;
-        private readonly IEnumerable<ISegmentationModelFactory> modelFactories;
         private readonly IProjectOptionsService projectOptionsService;
         private readonly ILogger<TrainingForm> logger;
         private CancellationTokenSource cts;
         private DataLogger? trainLossLogger;
         private DataLogger? validationLossLogger;
 
-        public TrainingForm(
-            SegmentationTrainingPipeline pipeline,
-            IEnumerable<ISegmentationModelFactory> modelFactories,
-            IProjectOptionsService projectOptionsService,
-            ILogger<TrainingForm> logger)
+        public TrainingForm(SegmentationTrainingPipeline pipeline, IProjectOptionsService projectOptionsService, ILogger<TrainingForm> logger)
         {
             // Allows designer to open the form without DI
             if (LicenseManager.UsageMode == LicenseUsageMode.Designtime)
@@ -41,7 +35,6 @@ namespace AnnotationTool.App.Forms
             InitializeDataPlots();
 
             this.pipeline = pipeline;
-            this.modelFactories = modelFactories;
             this.projectOptionsService = projectOptionsService;
             this.logger = logger;
         }
@@ -153,6 +146,9 @@ namespace AnnotationTool.App.Forms
 
             trainLossLogger.LineWidth = 2;
             validationLossLogger.LineWidth = 2;
+
+            trainLossLogger.ManageAxisLimits = true;
+            validationLossLogger.ManageAxisLimits = false;
         }
 
         // UI-safe forwarding
@@ -168,20 +164,6 @@ namespace AnnotationTool.App.Forms
             {
                 trainLossLogger?.Add(e.Epoch, e.TrainLoss > 1 ? 1 : e.TrainLoss);
                 validationLossLogger?.Add(e.Epoch, e.ValidationLoss > 1 ? 1 : e.ValidationLoss);
-
-
-                var trainLimits = trainLossLogger.GetAxisLimits();
-                var valLimits = validationLossLogger.GetAxisLimits();
-                var merged = trainLimits.Expanded(valLimits);
-
-                var yAxis = trainLossLogger.Axes.YAxis;
-                yAxis.Min = merged.Bottom;
-                yAxis.Max = merged.Top;
-
-                // And same for X-axis
-                var xAxis = trainLossLogger.Axes.XAxis;
-                xAxis.Min = merged.Left;
-                xAxis.Max = merged.Right;
 
                 formsPlotTrainLoss.Plot.Axes.AutoScale();
                 formsPlotTrainLoss.Refresh();
