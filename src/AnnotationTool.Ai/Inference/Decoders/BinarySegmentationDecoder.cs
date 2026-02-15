@@ -1,10 +1,11 @@
 ﻿using AnnotationTool.Core.Models;
 using OpenCvSharp;
-using static TorchSharp.torch;
-using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
-using static AnnotationTool.Ai.Utils.DatasetStatistics;
 using System.Collections.Generic;
 using System.Linq;
+using TorchSharp;
+using static AnnotationTool.Ai.Utils.DatasetStatistics;
+using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
+using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Inference.Decoders
 {
@@ -34,11 +35,20 @@ namespace AnnotationTool.Ai.Inference.Decoders
         /// </summary>
         public Dictionary<int, Mat[]> Decode(Tensor logits)
         {
-            // logits: [N,1,H,W]
-            using (var probs = sigmoid(logits).cpu())
+            using (var scope = torch.NewDisposeScope())
             {
-                var predSlices = TensorTo2DArray(probs);
-                return new Dictionary<int, Mat[]>() { { featureId, SlicedImageTensorToImage(predSlices) } };
+                // logits: [N,1,H,W]
+                using (var probs = sigmoid(logits).cpu())
+                {
+                    var predSlices = TensorTo2DArray(probs);
+
+                    var mats = SlicedImageTensorToImage(predSlices);
+
+                    return new Dictionary<int, Mat[]>
+                    {
+                        { featureId, mats }
+                    };
+                }
             }
         }
 

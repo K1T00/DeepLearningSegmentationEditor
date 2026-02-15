@@ -6,7 +6,7 @@ namespace AnnotationTool.App.Forms
 {
     public partial class InferenceForm : Form
     {
-        private CancellationTokenSource cts;
+        private CancellationTokenSource? cts;
         private readonly ISegmentationInferencePipeline pipeline;
         private readonly IProjectOptionsService projectOptionsService;
 
@@ -20,14 +20,13 @@ namespace AnnotationTool.App.Forms
             }
             InitializeComponent();
 
-            this.pipeline = pipeline;
-            this.projectOptionsService = projectOptionsService;
+            this.pipeline = pipeline!;
+            this.projectOptionsService = projectOptionsService!;
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
         {
             btnCancel.Enabled = false;
-            cts?.Cancel();
             this.Close();
         }
 
@@ -42,21 +41,17 @@ namespace AnnotationTool.App.Forms
             try
             {
                 projectPresenter.UpdateTrainingSettings(projectOptionsService.ExtractMetadataFilePath(selectedModelPath));
-
                 projectPresenter.Project.Settings.TrainModelSettings.Device = keepDeviceFromUi;
 
-
-                await Task.Run(async () =>
-                {
-                    await pipeline.RunInference(projectPresenter, selectedModelPath, progress, cts.Token);
-                }, cts.Token);
+                // Run inference on all images
+                await Task.Run(() => pipeline.RunInference(projectPresenter, selectedModelPath, progress, cts.Token), cts.Token);
 
                 btnCancel.Enabled = false;
-                cts?.Cancel();
                 this.Close();
             }
             catch (OperationCanceledException)
             {
+                // User canceled inference
                 this.Close();
             }
             catch (Exception ex)

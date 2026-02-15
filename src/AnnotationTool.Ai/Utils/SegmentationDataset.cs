@@ -32,7 +32,7 @@ namespace AnnotationTool.Ai.Utils
             this.transforms = transforms;
             this.project = project;
             this.cfg = cfg;
-            count = ReadFiles();
+            this.count = ReadFiles();
         }
 
         private int ReadFiles()
@@ -72,7 +72,6 @@ namespace AnnotationTool.Ai.Utils
                 {
                     if (project.Project.Features.Count == 1)
                     {
-
                         masks.Add(BinaryMaskToTensor(mskGrey, device));
                     }
                     else

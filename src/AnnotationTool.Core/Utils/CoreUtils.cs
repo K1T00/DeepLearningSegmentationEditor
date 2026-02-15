@@ -158,6 +158,21 @@ namespace AnnotationTool.Core.Utils
             return candidate;
         }
 
+        public static void TryDeleteFile(string path)
+        {
+            if (!File.Exists(path))
+                return;
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException ex)
+            {
+                Debug.WriteLine($"Could not delete {path}: {ex.Message}");
+            }
+        }
+
         public static bool IsAllZero(SegmentationStats stats)
         {
             if (stats == null)
@@ -313,6 +328,7 @@ namespace AnnotationTool.Core.Utils
             return remap;
         }
 
-
+        public static ImageItem FindById(DeepLearningProject project, Guid id)
+            => project.Images.FirstOrDefault(i => i.Guid == id);
     }
 }

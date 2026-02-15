@@ -12,8 +12,10 @@
         public string SlicedMasksSubFolder { get; } = "Results/Preprocessing/SlicedMasks";
         public string HeatmapsSubFolder { get; } = "Results/Heatmaps/Images";
         public string HeatmapsOverlaysSubFolder { get; } = "Results/Heatmaps/Overlays";
-        public string DateTimeFormat { get; set; } = "yyyy_MM_dd_HH_mm_ss";
-        public string ModelFileName { get; set; } = "Model_";
-        public string TrainingSettingsFileName { get; set; } = "Trainingsettings_";
+        public string DateTimeFormat { get; } = "yyyy_MM_dd_HH_mm_ss";
+        public string ModelFileName { get; } = "Model_";
+        public string TrainingSettingsFileName { get; } = "Trainingsettings_";
+        public string ImageExtension { get; } = ".png";
+        public string ModelExtension { get; } = ".bin";
     }
 }

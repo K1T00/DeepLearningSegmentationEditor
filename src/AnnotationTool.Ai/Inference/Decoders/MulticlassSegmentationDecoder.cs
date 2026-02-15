@@ -36,22 +36,26 @@ namespace AnnotationTool.Ai.Inference.Decoders
         /// </summary>
         public Dictionary<int, Mat[]> Decode(Tensor logits)
         {
-            // logits: [N, C, H, W]
-            using (var probs = softmax(logits, dim: 1).cpu())
+            using (var scope = NewDisposeScope())
             {
-                var result = new Dictionary<int, Mat[]>();
-
-                // Skip background class 0
-                for (int classId = 1; classId < numClasses; classId++)
+                // logits: [N, C, H, W]
+                using (var probs = softmax(logits, dim: 1).cpu())
                 {
-                    // Select probability map for classId → [N,H,W] with unsqueeze for [N,1,H,W]
-                    using (var classProb = probs.select(1, classId).unsqueeze(1))
+                    var result = new Dictionary<int, Mat[]>();
+
+                    // Skip background class 0
+                    for (int classId = 1; classId < numClasses; classId++)
                     {
-                        var predSlices = TensorTo2DArray(classProb);
-                        result.Add(classId, SlicedImageTensorToImage(predSlices));
+                        // Select probability map for classId → [N,H,W] with unsqueeze for [N,1,H,W]
+                        using (var classProb = probs.select(1, classId).unsqueeze(1))
+                        {
+                            var predSlices = TensorTo2DArray(classProb);
+                            result.Add(classId, SlicedImageTensorToImage(predSlices));
+                        }
                     }
+
+                    return result;
                 }
-                return result;
             }
         }
 
@@ -71,7 +75,7 @@ namespace AnnotationTool.Ai.Inference.Decoders
                 // Build binary GT mask for this class
                 using (var gtBinary = new Mat())
                 {
-                    Cv2.Compare(groundTruth, new Scalar(classId), gtBinary, CmpType.EQ);
+                    Cv2.Compare(groundTruth, new OpenCvSharp.Scalar(classId), gtBinary, CmpType.EQ);
 
                     // gtBinary is 255 for classId, 0 otherwise
                     result[classId] = ComputeBinaryMetrics(prediction, gtBinary);

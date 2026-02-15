@@ -21,8 +21,8 @@ namespace AnnotationTool.Core.Interaction
         {
             var imgPos = viewport.ScreenToImage(screenPos);
 
-            Mode = CoreUtils.GetRoiHitMode(imgPos, Roi, viewport) ?? (Roi.Contains(imgPos) 
-                ? RoiMode.Moving 
+            Mode = CoreUtils.GetRoiHitMode(imgPos, Roi, viewport) ?? (Roi.Contains(imgPos)
+                ? RoiMode.Moving
                 : RoiMode.None);
 
             lastImgPos = imgPos;

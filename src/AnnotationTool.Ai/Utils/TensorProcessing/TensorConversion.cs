@@ -1,7 +1,6 @@
 ﻿using AnnotationTool.Core.Models;
 using OpenCvSharp;
 using System;
-using TorchSharp;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageConversion;
 using static TorchSharp.torch;
 

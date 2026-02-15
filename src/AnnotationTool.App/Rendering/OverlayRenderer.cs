@@ -18,25 +18,22 @@ namespace AnnotationTool.App.Rendering
     ///   can be LockBits()'d and DrawImage()'d concurrently.
     /// - This class does NOT lock; it stays UI/framework agnostic.
     /// </summary>
-    public sealed class OverlayRenderer
+    public static class OverlayRenderer
     {
-
-        private readonly Font hudFont = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Pixel);
-
-
         /// <summary>
         /// Draw a bitmap in image space using the viewport transform.
         /// This is for "image-space" bitmaps: FullImage, AnnotationOverlay, Heatmaps that match image size.
         /// </summary>
-        public void DrawImage(Graphics g, Bitmap image, Viewport viewport)
+        public static void DrawImage(Graphics g, Bitmap image, Viewport viewport)
         {
-            if (image == null || g == null)
-                return;
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(image);
+            ArgumentNullException.ThrowIfNull(viewport);
 
             var imgRect = viewport.ImageToScreenRect(new RectangleF(0, 0, image.Width, image.Height));
 
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
 
             g.DrawImage(
                 image,
@@ -49,53 +46,55 @@ namespace AnnotationTool.App.Rendering
         /// <summary>
         /// Draw ROI rectangle (in image coordinates) onto the screen.
         /// </summary>
-        public void DrawRoi(Graphics g, RoiController roiController, Viewport viewport)
+        public static void DrawRoi(Graphics g, RoiController roiController, Viewport viewport)
         {
-            if (g == null | roiController == null)
-                return;
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(roiController);
+            ArgumentNullException.ThrowIfNull(viewport);
 
             var roi = roiController.Roi;
             var roiScreen = viewport.ImageToScreenRect(roi);
 
-            using (var pen = new Pen(Color.Red, 2f))
-            {
-                pen.Alignment = PenAlignment.Inset;
-                
-                g.DrawRectangle(
-                    pen,
-                    roiScreen.X,
-                    roiScreen.Y,
-                    roiScreen.Width,
-                    roiScreen.Height);
-            }
+            using var pen = new Pen(Color.Red, 2f);
+            pen.Alignment = PenAlignment.Inset;
+
+            g.DrawRectangle(
+                pen,
+                roiScreen.X,
+                roiScreen.Y,
+                roiScreen.Width,
+                roiScreen.Height);
         }
 
-        public void DrawBrushIndicator(Graphics g, RoiController roiController, Viewport viewport, PictureBox mainPictureBox, int currentBrushSize)
+        public static void DrawBrushIndicator(Graphics g, RoiController roiController, Viewport viewport, PictureBox mainPictureBox, int currentBrushSize)
         {
-            var roi = roiController.Roi;
-            var roiScreen = viewport.ImageToScreenRect(roi);
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(roiController);
+            ArgumentNullException.ThrowIfNull(viewport);
+            ArgumentNullException.ThrowIfNull(mainPictureBox);
 
-            using (var pen = new Pen(Color.Blue, 4) { DashStyle = DashStyle.Solid })
-            {
-                g.DrawEllipse(
-                    pen,
-                    mainPictureBox.Width / 2 - currentBrushSize / 2,
-                    mainPictureBox.Height / 2 - currentBrushSize / 2,
-                    (int)(currentBrushSize * viewport.Zoom),
-                    (int)(currentBrushSize * viewport.Zoom));
-            }
+            //var roi = roiController.Roi;
+            //var roiScreen = viewport.ImageToScreenRect(roi);
+
+            using var pen = new Pen(Color.Blue, 4) { DashStyle = DashStyle.Solid };
+            g.DrawEllipse(
+                pen,
+                mainPictureBox.Width / 2 - currentBrushSize / 2,
+                mainPictureBox.Height / 2 - currentBrushSize / 2,
+                (int)(currentBrushSize * viewport.Zoom),
+                (int)(currentBrushSize * viewport.Zoom));
         }
 
         /// <summary>
         /// Optional: draw debug text in screen space.
         /// </summary>
-        public void DrawText(Graphics g, string text, Point screenPos)
+        public static void DrawText(Graphics g, string text, Point screenPos)
         {
-            using (var font = new Font("Segoe UI", 9))
-            using (var brush = new SolidBrush(Color.White))
-            {
-                g.DrawString(text, font, brush, screenPos);
-            }
+            ArgumentNullException.ThrowIfNull(g);
+
+            using var font = new Font("Segoe UI", 9);
+            using var brush = new SolidBrush(Color.White);
+            g.DrawString(text, font, brush, screenPos);
         }
 
 
@@ -111,14 +110,18 @@ namespace AnnotationTool.App.Rendering
         /// IMPORTANT:
         /// - Caller must hold the overlay's synchronization lock around calls to this method AND around drawing.
         /// </summary>
-        public void UpdateAnnotationOverlayRegion(
+        public static void UpdateAnnotationOverlayRegion(
             Bitmap overlay,
             LabelMask mask,
-            Dictionary<int, Color> featureColorMap,
+            IReadOnlyDictionary<int, Color> featureColorMap,
             Rectangle imageRect,
             byte overlayAlpha)
         {
-            if (overlay == null || imageRect.Width <= 0 || imageRect.Height <= 0)
+            ArgumentNullException.ThrowIfNull(overlay);
+            ArgumentNullException.ThrowIfNull(mask);
+            ArgumentNullException.ThrowIfNull(featureColorMap);
+
+            if (imageRect.Width <= 0 || imageRect.Height <= 0)
                 return;
 
             var data = overlay.LockBits(imageRect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
@@ -173,62 +176,64 @@ namespace AnnotationTool.App.Rendering
         /// <summary>
         /// Draws a semi-transparent grayscale mask (e.g. prediction or label).
         /// </summary>
-        public void DrawMask(Graphics g, Bitmap mask, Viewport viewport, float opacity = 0.5f)
+        public static void DrawMask(Graphics g, Bitmap mask, Viewport viewport, float opacity = 0.5f)
         {
             if (mask == null)
                 return;
 
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(viewport);
+
             var rect = viewport.ImageToScreenRect(
                 new RectangleF(0, 0, mask.Width, mask.Height));
 
-            using (var attr = new ImageAttributes())
+            using var attr = new ImageAttributes();
+            var matrix = new ColorMatrix
             {
-                var matrix = new ColorMatrix
-                {
-                    Matrix33 = opacity
-                };
+                Matrix33 = opacity
+            };
 
-                attr.SetColorMatrix(matrix);
+            attr.SetColorMatrix(matrix);
 
-                g.DrawImage(
-                    mask,
-                    Rectangle.Round(rect),
-                    0,
-                    0,
-                    mask.Width,
-                    mask.Height,
-                    GraphicsUnit.Pixel,
-                    attr);
-            }
+            g.DrawImage(
+                mask,
+                Rectangle.Round(rect),
+                0,
+                0,
+                mask.Width,
+                mask.Height,
+                GraphicsUnit.Pixel,
+                attr);
         }
 
-     
+
         // Draw feature size rectangle at top-left of the PictureBox
-        public void DrawSliceSizeRectangle(Graphics g, RoiController roiController, Viewport viewport, int sliceSize, int downSample)
+        public static void DrawSliceSizeRectangle(Graphics g, RoiController roiController, Viewport viewport, int sliceSize, int downSample)
         {
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(roiController);
+            ArgumentNullException.ThrowIfNull(viewport);
+
             var effectiveSize = sliceSize * (1 << downSample);
-            var roi = roiController.Roi;
-            var roiScreen = viewport.ImageToScreenRect(roi);
+            //var roi = roiController.Roi;
+            //var roiScreen = viewport.ImageToScreenRect(roi);
             var screenRect = new Rectangle(10, 10, (int)(effectiveSize * viewport.Zoom), (int)(effectiveSize * viewport.Zoom));
 
-            using (var p = new Pen(Color.Green, 2))
-            {
-                g.DrawRectangle(p, screenRect);
-            }
+            using var p = new Pen(Color.Green, 2);
+            g.DrawRectangle(p, screenRect);
 
         }
 
         /// <summary>
         /// Draws a heatmap bitmap aligned with the image.
         /// </summary>
-        public void DrawHeatmap(Graphics g, Bitmap heatmap, Viewport viewport, float opacity = 0.6f)
+        public static void DrawHeatmap(Graphics g, Bitmap heatmap, Viewport viewport, float opacity = 0.6f)
         {
+            ArgumentNullException.ThrowIfNull(g);
+            ArgumentNullException.ThrowIfNull(viewport);
+
             DrawMask(g, heatmap, viewport, opacity);
         }
 
-        public void Dispose()
-        {
-            hudFont.Dispose();
-        }
     }
 }

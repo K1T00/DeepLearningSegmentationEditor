@@ -1,11 +1,6 @@
-﻿using AnnotationTool.Core.Services;
-using OpenCvSharp;
+﻿using OpenCvSharp;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using static AnnotationTool.Ai.Utils.ImageProcessing.ImageAnalysis;
 
 namespace AnnotationTool.Ai.Utils.ImageProcessing
 {

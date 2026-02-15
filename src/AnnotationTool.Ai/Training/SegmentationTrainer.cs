@@ -1,5 +1,4 @@
-﻿using AnnotationTool.Ai.Models;
-using AnnotationTool.Core.Models;
+﻿using AnnotationTool.Core.Models;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;

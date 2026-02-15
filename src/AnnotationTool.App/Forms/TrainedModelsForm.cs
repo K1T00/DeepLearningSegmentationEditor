@@ -1,14 +1,12 @@
-﻿using System.Diagnostics;
+﻿using AnnotationTool.Core.Services;
+using static AnnotationTool.Core.Utils.CoreUtils;
 
 namespace AnnotationTool.App.Forms
 {
     public partial class TrainedModelsForm : Form
     {
-        public string ModelsPath { get; set; }
-        public string ModelSubFileName { get; set; }
-        public string TrainingSettingsSubFileName { get; set; }
-
-        public string SelectedModelFileName { get; private set; }
+        required public ProjectPaths Paths { get; set; }
+        public string? SelectedModelFileName { get; private set; }
 
         public TrainedModelsForm()
         {
@@ -33,56 +31,65 @@ namespace AnnotationTool.App.Forms
 
         private void TrainedModelsForm_Load(object sender, EventArgs e)
         {
-            var models = Directory.GetFiles(ModelsPath, ModelSubFileName + "*.bin")
+            if (Paths == null)
+            {
+                MessageBox.Show(
+                    "Project paths are not set.",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                Close();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(Paths.Models) || !Directory.Exists(Paths.Models))
+            {
+                MessageBox.Show(
+                    "Models directory is not configured.",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                Close();
+                return;
+            }
+
+            var models = Directory.GetFiles(Paths.Models, Paths.ModelSub + "*" + Paths.ModelExt)
                 .Select(Path.GetFileNameWithoutExtension)
-                .OrderByDescending(File.GetCreationTime!)
+                .OrderByDescending(path => File.GetCreationTime(
+                    Path.Combine(Paths.Models, path + Paths.ModelExt)))
                 .ToList();
+
             lbTrainedModels.DataSource = models;
         }
 
         private void btnDeleteModel_Click(object sender, EventArgs e)
         {
-            if (lbTrainedModels.SelectedItem is string path)
-            {
-                var confirm = MessageBox.Show(this, "Delete model?", "Warning",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (lbTrainedModels.SelectedItem is not string modelName)
+                return;
 
-                if (confirm != DialogResult.Yes) return;
-            }
+            var confirm = MessageBox.Show(
+                this,
+               "Delete model?",
+               "Warning",
+               MessageBoxButtons.YesNo,
+               MessageBoxIcon.Question);
 
-            if (lbTrainedModels.SelectedItem == null) return;
+            if (confirm != DialogResult.Yes)
+                return;
 
-            var modelFile = Path.ChangeExtension(Path.Combine(ModelsPath, (string)lbTrainedModels.SelectedItem), ".bin");
-            var settingsFile = Path.ChangeExtension(Path.Combine(ModelsPath, (string)lbTrainedModels.SelectedItem).Replace(ModelSubFileName, TrainingSettingsSubFileName), ".json");
+            var modelFile = Path.Combine(Paths.Models, modelName + Paths.ModelExt);
+            var settingsFile = Path.Combine(
+                Paths.Models,
+                modelName.Replace(Paths.ModelSub, Paths.ModelSettingsSub) + ".json");
 
-            if (File.Exists(modelFile))
-            {
-                try
-                {
-                    File.Delete(modelFile);
-                }
-                catch (IOException ex)
-                {
-                    Debug.WriteLine($"Could not delete {modelFile}: {ex.Message}");
-                }
-            }
+            TryDeleteFile(modelFile);
+            TryDeleteFile(settingsFile);
 
-            if (File.Exists(settingsFile))
-            {
-                try
-                {
-                    File.Delete(settingsFile);
-                }
-                catch (IOException ex)
-                {
-                    Debug.WriteLine($"Could not delete {settingsFile}: {ex.Message}");
-                }
-            }
-
-            var models = Directory.GetFiles(ModelsPath, ModelSubFileName + "*.bin")
+            var models = Directory.GetFiles(Paths.Models, Paths.ModelSub + "*" + Paths.ModelExt)
                      .Select(Path.GetFileNameWithoutExtension)
                      .OrderByDescending(File.GetCreationTime!)
                      .ToList();
+
             lbTrainedModels.DataSource = models;
         }
     }

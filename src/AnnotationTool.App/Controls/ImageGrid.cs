@@ -1,5 +1,5 @@
 ﻿using AnnotationTool.Core.Models;
-using static AnnotationTool.Core.Utils.BitmapIO;
+using System.Drawing.Drawing2D;
 using static AnnotationTool.Core.Utils.CoreUtils;
 
 namespace AnnotationTool.App.Controls
@@ -7,17 +7,17 @@ namespace AnnotationTool.App.Controls
     public partial class ImageGrid : UserControl
     {
 
-        public event EventHandler<Guid> ImageSelected;
-        public event EventHandler<(Guid Id, int Width, int Height)> ImageAdded;
+        public event EventHandler<Guid>? ImageSelected;
+        public event EventHandler<Guid>? ImageAdded;
 
-        private readonly List<PictureBox> selectedPictureBoxes;
+        private readonly List<PictureBox> selectedPictureBoxes = new List<PictureBox>();
         private readonly List<Guid> imageIds = [];
-        private PictureBox lastClickedPictureBox;
+        private PictureBox? lastClickedPictureBox;
+
 
         public ImageGrid()
         {
             InitializeComponent();
-            selectedPictureBoxes = new List<PictureBox>();
         }
 
         public bool HasSelectedImages
@@ -25,33 +25,18 @@ namespace AnnotationTool.App.Controls
             get { return selectedPictureBoxes.Count > 0; }
         }
 
-        public void AddImage(Guid imageId, string imagePath)
+        public void AddImage(Guid imageId, Bitmap thumbnail)
         {
-            if (imageIds.Contains(imageId)) return;
-
             const int labelPosX = 5;
             const int labelPosY = 5;
             const int padding = 7;
-            var containerWidth = this.Width - 40;
-
-            var originalImage = LoadBitmapUnlocked(imagePath);
-
-            // Preserve aspect ratio (width fixed, height scales)
-            var originalW = originalImage.Width;
-            var originalH = originalImage.Height;
-            var ratio = (float)originalW / originalH;
-            var thumbW = containerWidth;
-            var thumbH = (int)(thumbW / ratio);
-            if (thumbH < 1) thumbH = 1;
-            int resultPosY = thumbH - labelPosY - 24;
-
-            var thumbnail = originalImage.GetThumbnailImage(thumbW, thumbH, null, IntPtr.Zero);
+            int resultPosY = thumbnail.Height - labelPosY - 24;
 
             var pictureBox = new PictureBox
             {
                 Name = "thumbnailPictureBox",
                 Image = thumbnail,
-                Size = new Size(thumbW, thumbH),
+                Size = new Size(thumbnail.Width, thumbnail.Height),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 Margin = new Padding(padding),
                 Tag = imageId,
@@ -83,7 +68,7 @@ namespace AnnotationTool.App.Controls
             var panel = new Panel
             {
                 Name = "thumbnailPanel",
-                Size = new Size(thumbW, thumbH),
+                Size = new Size(thumbnail.Width, thumbnail.Height),
                 Margin = new Padding(padding)
             };
 
@@ -95,9 +80,11 @@ namespace AnnotationTool.App.Controls
 
             pictureBox.Click += (sender, e) =>
             {
-                var clicked = (PictureBox)sender;
-                ToggleSelection(clicked);
-                ImageSelected?.Invoke(this, (Guid)clicked.Tag);
+                if (sender is not PictureBox clickedPb)
+                    return;
+
+                ToggleSelection(clickedPb);
+                ImageSelected?.Invoke(this, GetImageId(clickedPb));
             };
 
             pictureBox.Paint += PictureBox_Paint;
@@ -106,20 +93,21 @@ namespace AnnotationTool.App.Controls
             imageIds.Add(imageId);
 
             // Notify MainForm with image dimensions
-            ImageAdded?.Invoke(this, (imageId, originalImage.Width, originalImage.Height));
-            originalImage.Dispose();
+            ImageAdded?.Invoke(this, imageId);
         }
 
         public List<Guid> GetImageIds() => new(imageIds);
 
-        public List<Guid> GetSelectedImageIds() => selectedPictureBoxes.Select(pb => (Guid)pb.Tag).ToList();
+        public List<Guid> GetSelectedImageIds() => selectedPictureBoxes.Select(GetImageId).ToList();
 
         public void RemoveSelectedImages()
         {
             foreach (var pb in selectedPictureBoxes.ToList())
             {
-                var panel = pb.Parent as Panel;
-                var id = (Guid)pb.Tag;
+                if (pb.Parent is not Panel panel)
+                    continue;
+
+                var id = GetImageId(pb);
                 imageGridflowLayoutPanel.Controls.Remove(panel);
                 panel.Dispose();
                 imageIds.Remove(id);
@@ -181,10 +169,7 @@ namespace AnnotationTool.App.Controls
                 return;
 
             // Find the PictureBox inside it
-            var pb = panel.Controls
-                          .OfType<PictureBox>()
-                          .FirstOrDefault(pc => pc.Name == "thumbnailPictureBox");
-
+            var pb = panel.Controls.OfType<PictureBox>().FirstOrDefault(pc => pc.Name == "thumbnailPictureBox");
             if (pb == null)
                 return;
 
@@ -222,13 +207,35 @@ namespace AnnotationTool.App.Controls
             lastClickedPictureBox = null;
         }
 
-        private Panel FindPanelById(Guid imageId)
+        public List<IDisposable> ExtractItemsForDisposal()
+        {
+            // Always runs on UI thread
+            SuspendLayout();
+            imageGridflowLayoutPanel.SuspendLayout();
+
+            var disposables = new List<IDisposable>();
+
+            foreach (Control c in imageGridflowLayoutPanel.Controls)
+            {
+                if (c is PictureBox item)
+                    disposables.Add(item); // item holds Bitmaps
+            }
+
+            imageGridflowLayoutPanel.Controls.Clear();
+
+            imageGridflowLayoutPanel.ResumeLayout();
+            ResumeLayout();
+
+            return disposables;
+        }
+
+        private Panel? FindPanelById(Guid imageId)
         {
             return imageGridflowLayoutPanel.Controls.OfType<Panel>().FirstOrDefault(
                 p =>
                 {
                     var pb = p.Controls.OfType<PictureBox>().FirstOrDefault(pc => pc.Name == "thumbnailPictureBox");
-                    return pb != null && (Guid)pb.Tag == imageId;
+                    return pb != null && GetImageId(pb) == imageId;
                 });
         }
 
@@ -241,7 +248,7 @@ namespace AnnotationTool.App.Controls
                 return;
 
             using var pen = new Pen(Color.DeepSkyBlue, 4);
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            e.Graphics.SmoothingMode = SmoothingMode.None;
             e.Graphics.DrawRectangle(pen, 2, 2, pb.Width - 5, pb.Height - 5);
         }
 
@@ -263,15 +270,27 @@ namespace AnnotationTool.App.Controls
         public void UpdateTrainResult(Guid imageId, string resultText)
         {
             var panel = FindPanelById(imageId);
-            if (panel == null) return;
+            if (panel == null)
+                return;
 
             var label = panel.Controls.OfType<Label>().FirstOrDefault(l => l.Name == "trainResultLabel");
-            if (label == null) return;
+            if (label == null)
+                return;
 
-            label.Text = resultText ?? "";
+            label.Text = resultText;
             label.BringToFront();
             panel.Invalidate();
         }
+
+        private static Guid GetImageId(PictureBox pb)
+        {
+            if (pb.Tag is not Guid id)
+                throw new InvalidOperationException("PictureBox.Tag must contain a Guid");
+
+            return id;
+        }
+
+
     }
 }
 

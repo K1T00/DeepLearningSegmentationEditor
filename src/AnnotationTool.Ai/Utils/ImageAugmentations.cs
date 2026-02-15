@@ -1,7 +1,6 @@
 ﻿using AnnotationTool.Core.Models;
 using System;
 using System.Collections.Generic;
-using TorchSharp;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorComputations;
 using static TorchSharp.torch;
 using static TorchSharp.torchvision.transforms.functional;

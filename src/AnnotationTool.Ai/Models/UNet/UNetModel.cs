@@ -1,6 +1,5 @@
 ﻿using AnnotationTool.Ai.Utils;
 using AnnotationTool.Core.Models;
-using AnnotationTool.Core.Services;
 using System.Collections.Generic;
 using TorchSharp;
 using TorchSharp.Modules;
@@ -135,12 +134,14 @@ namespace AnnotationTool.Ai.Models.UNet
                         var interpolatedSkip =
                             interpolate(skip, new long[] { upSampled.shape[2], upSampled.shape[3] }, mode: InterpolationMode.Bilinear, align_corners: false);
 
-                        var concatenated = cat(new List<Tensor>() { upSampled, interpolatedSkip }, 1);
+                        //var concatenated = cat(new List<Tensor>() { upSampled, interpolatedSkip }, 1);
+                        var concatenated = cat(new[] { upSampled, interpolatedSkip }, 1);
                         x = decoderLayers[i].call(concatenated);
                     }
                     else
                     {
-                        var concatenated = cat(new List<Tensor>() { upSampled, skip }, 1);
+                        //var concatenated = cat(new List<Tensor>() { upSampled, skip }, 1);
+                        var concatenated = cat(new[] { upSampled, skip }, 1);
                         x = decoderLayers[i].call(concatenated);
                     }
                 }

@@ -1,5 +1,4 @@
-﻿using System;
-using AnnotationTool.Core.Models;
+﻿using AnnotationTool.Core.Models;
 using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models

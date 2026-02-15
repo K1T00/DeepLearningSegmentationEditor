@@ -1,8 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.IO;
 
 namespace AnnotationTool.Core.Models
 {
@@ -13,170 +10,95 @@ namespace AnnotationTool.Core.Models
     /// Deals with file I/O for loading images, caching, and lifecycle(Dispose).
     /// Can add thumbnails, cache eviction, thread safety, async loading later—without touching the JSON model.
     /// 
+    ///  Owns and manages ImageRuntime instances.
+    /// One ImageRuntime per logical image (Guid).
+    /// Thread-safe.
     /// </summary>
+    /// 
     public sealed class ImageRepository : IDisposable
     {
+        private readonly Dictionary<Guid, ImageRuntime> runtimeRepo = new Dictionary<Guid, ImageRuntime>();
 
-        public sealed class ImageRuntime
-        {
-            public Bitmap FullImage { get; set; }
-            public Bitmap Annotation { get; set; }
-            public LabelMask Mask { get; set; }
-            public Bitmap Heatmap { get; set; }
+        private readonly object repoLock = new object();
+        private bool disposed;
 
-            // Synchronization locks for resources that may be accessed concurrently
-            public readonly object AnnotationLock = new object();
-            public readonly object HeatmapLock = new object();
-        }
-
-        private readonly Dictionary<Guid, ImageRuntime> rtRepo = new Dictionary<Guid, ImageRuntime>();
-
-
-        // Get (or create) the runtime bucket for an image id.
+        /// <summary>
+        /// Gets (or creates) the ImageRuntime for the given image id.
+        /// Thread-safe.
+        /// </summary>
         public ImageRuntime GetRuntime(Guid id)
         {
-            if (!rtRepo.TryGetValue(id, out var rt))
+            if (disposed)
+                throw new ObjectDisposedException(nameof(ImageRepository));
+
+            lock (repoLock)
             {
-                rt = new ImageRuntime();
-                rtRepo[id] = rt;
-            }
-            return rt;
-        }
-
-        /// <summary>
-        /// Load and cache the full-res bitmap for <paramref name="id"/> from <paramref name="absolutePath"/>.
-        /// Returns an unlocked 32bpp clone and lazily ensures a LabelMask + Annotation sized to the image.
-        /// </summary>
-        public Bitmap EnsureFull(Guid id, string absolutePath)
-        {
-            var rt = GetRuntime(id);
-
-            if (rt.FullImage != null)
-                return rt.FullImage;
-
-            if (!File.Exists(absolutePath))
-                throw new FileNotFoundException("Image not found", absolutePath);
-
-
-
-
-            using (var tmp = Image.FromFile(absolutePath))
-            {
-                rt.FullImage = new Bitmap(tmp);
-            }
-
-            // Ensure annotation + mask exist
-            EnsureAnnotationAndMask(rt);
-
-
-            return rt.FullImage;
-        }
-
-        private static void EnsureAnnotationAndMask(ImageRuntime rt)
-        {
-            if (rt.FullImage == null)
-                return;
-
-            int w = rt.FullImage.Width;
-            int h = rt.FullImage.Height;
-
-            if (rt.Mask == null)
-                rt.Mask = CreateEmptyMask(w, h);
-
-            if (rt.Annotation == null)
-            {
-                lock (rt.AnnotationLock)
+                if (!runtimeRepo.TryGetValue(id, out var rt))
                 {
-                    if (rt.Annotation == null)
-                        rt.Annotation = CreateAnnotationBitmap(w, h);
+                    rt = new ImageRuntime();
+                    runtimeRepo[id] = rt;
                 }
+
+                return rt;
             }
         }
 
         /// <summary>
-        /// Ensure a mask and annotation(for visualization) exists for <paramref name="id"/> with the given size and a bound MaskCanvas.
+        /// Removes and disposes the ImageRuntime for the given image id.
+        /// Call when an image is closed or deleted.
         /// </summary>
-        public (LabelMask, Bitmap) GetOrCreateAnnotationMask(Guid id, int width, int height)
+        public bool Remove(Guid id)
         {
-            var rt = GetRuntime(id);
-            if (rt.Mask == null || rt.Mask.Width != width || rt.Mask.Height != height)
-                rt.Mask = new LabelMask(width, height);
+            if (disposed)
+                return false;
 
-            if (rt.Annotation == null)
-            {
-                rt.Annotation = CreateAnnotationBitmap(width, height);
-            }
-            return (rt.Mask, rt.Annotation);
-        }
-
-        private static Bitmap CreateAnnotationBitmap(int width, int height)
-        {
-            return new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        }
-
-        private static LabelMask CreateEmptyMask(int w, int h)
-        {
-            return new LabelMask(w, h);
-        }
-
-        public void SetHeatmap(Guid imageGuid, Bitmap newHeatmap)
-        {
-            var rt = GetRuntime(imageGuid);
-
-            lock (rt.HeatmapLock)
-            {
-                rt.Heatmap?.Dispose();
-                rt.Heatmap = newHeatmap;
-            }
-        }
-
-        /// <summary>Dispose and forget runtime resources for a single image id.</summary>
-        public void DisposeRuntime(Guid imageGuid)
-        {
             ImageRuntime rt;
-            if (!rtRepo.TryGetValue(imageGuid, out rt))
+
+            lock (repoLock)
+            {
+                if (!runtimeRepo.TryGetValue(id, out rt))
+                    return false;
+
+                runtimeRepo.Remove(id);
+            }
+
+            // Dispose outside lock
+            rt.Dispose();
+            return true;
+        }
+
+        /// <summary>
+        /// Clears all ImageRuntimes and disposes them.
+        /// </summary>
+        public void Clear()
+        {
+            if (disposed)
                 return;
 
-            lock (rt.AnnotationLock)
+            List<ImageRuntime> toDispose;
+
+            lock (repoLock)
             {
-                rt.Annotation?.Dispose();
-                rt.Annotation = null;
+                toDispose = new List<ImageRuntime>(runtimeRepo.Values);
+                runtimeRepo.Clear();
             }
 
-            lock (rt.HeatmapLock)
-            {
-                rt.Heatmap?.Dispose();
-                rt.Heatmap = null;
-            }
-
-            rt.FullImage?.Dispose();
-            rt.FullImage = null;
-
-            rt.Mask = null;
-
-            rtRepo.Remove(imageGuid);
+            // Dispose outside lock
+            foreach (var rt in toDispose)
+                rt.Dispose();
         }
 
+        /// <summary>
+        /// Disposes the repository and all managed ImageRuntimes.
+        /// </summary>
         public void Dispose()
         {
-            foreach (var kv in rtRepo)
-            {
-                var rt = kv.Value;
+            if (disposed)
+                return;
 
-                lock (rt.AnnotationLock)
-                {
-                    rt.Annotation?.Dispose();
-                }
-
-                lock (rt.HeatmapLock)
-                {
-                    rt.Heatmap?.Dispose();
-                }
-
-                rt.FullImage?.Dispose();
-            }
-
-            rtRepo.Clear();
+            disposed = true;
+            Clear();
         }
     }
+
 }

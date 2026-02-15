@@ -41,6 +41,16 @@ namespace AnnotationTool.Core.Services
             return relative;
         }
 
+        public string GetImageExtension()
+        {
+            return options.ImageExtension;
+        }
+
+        public string GetModelExtension()
+        {
+            return options.ModelExtension;
+        }
+
         public string GetFolderPath(string projectRoot, ProjectFolderType type)
         {
             if (!folderMap.TryGetValue(type, out var relative))
@@ -100,4 +110,43 @@ namespace AnnotationTool.Core.Services
             return options.TrainingSettingsFileName;
         }
     }
+
+    public sealed class ProjectPaths
+    {
+        public string Root { get; }
+        public string Images { get; }
+        public string Masks { get; }
+        public string Annotations { get; }
+        public string Results { get; }
+        public string SlicedImages { get; }
+        public string SlicedMasks { get; }
+        public string HeatmapsImages { get; }
+        public string HeatmapsOverlays { get; }
+        public string Models { get; }
+        public string ModelSub { get; }
+        public string ModelSettingsSub { get; }
+        public string JsonPath { get; }
+        public string ImagesExt { get; }
+        public string ModelExt { get; }
+
+        public ProjectPaths(string projectRoot, string projectName, IProjectOptionsService options)
+        {
+            this.Root = projectRoot;
+            this.Images = options.GetFolderPath(projectRoot, ProjectFolderType.Images);
+            this.Masks = options.GetFolderPath(projectRoot, ProjectFolderType.Masks);
+            this.Annotations = options.GetFolderPath(projectRoot, ProjectFolderType.Annotations);
+            this.Results = options.GetFolderPath(projectRoot, ProjectFolderType.Results);
+            this.SlicedImages = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedImages);
+            this.SlicedMasks = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedMasks);
+            this.HeatmapsImages = options.GetFolderPath(projectRoot, ProjectFolderType.HeatmapsImages);
+            this.HeatmapsOverlays = options.GetFolderPath(projectRoot, ProjectFolderType.HeatmapsOverlays);
+            this.Models = options.GetFolderPath(projectRoot, ProjectFolderType.Models);
+            this.ModelSub = options.GetModelsSubFileName();
+            this.ModelSettingsSub = options.GetTrainingSettingsSubFileName();
+            this.JsonPath = Path.Combine(projectRoot, projectName + ".json");
+            this.ImagesExt = options.GetImageExtension();
+            this.ModelExt = options.GetModelExtension();
+        }
+    }
+
 }
