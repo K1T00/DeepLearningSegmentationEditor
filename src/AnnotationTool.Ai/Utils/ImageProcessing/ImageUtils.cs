@@ -69,6 +69,7 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
             }
         }
 
+        // Left here because might need it later for debugging/visualization, but not currently used in training/inference.
         public static unsafe (Mat superImposed, Mat heatmap) ImageToHeatmap(Mat img, Mat mask, int threshold)
         {
             // Convert grayscale to RGB if needed

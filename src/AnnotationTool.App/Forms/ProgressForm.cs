@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace AnnotationTool.App.Forms
+﻿namespace AnnotationTool.App.Forms
 {
     public partial class ProgressForm : Form
     {

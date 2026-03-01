@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 
 namespace AnnotationTool.Core.Models
 {
@@ -27,8 +28,8 @@ namespace AnnotationTool.Core.Models
         {
             if (other == null) return;
 
-            this.Features = other.Features;
-            this.Images = other.Images;
+            this.Features = other.Features.ToList() ?? new List<Feature>();
+            this.Images = other.Images.ToList() ?? new List<ImageItem>();
             this.Settings.CopyFrom(other.Settings);
         }
     }

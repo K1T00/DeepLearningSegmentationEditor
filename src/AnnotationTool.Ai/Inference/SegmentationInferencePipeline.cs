@@ -115,32 +115,15 @@ namespace AnnotationTool.Ai.Inference
                                     }
                                     sw.Stop();
 
-                                    //Visualization
+                                    // Save mask result for later heatmap visualization and metrics computation
                                     foreach (var kv in fullMaskPredictions)
                                     {
-                                        // Create visualization
-                                        var (heatmap, overlay) =
-                                            ImageToHeatmap(
-                                                image,
-                                                kv.Value[0, image.Height, 0, image.Width],
-                                                project.Project.Settings.HeatmapThreshold);
-                                        try
-                                        {
-                                            var subDirHeatmap = Path.Combine(paths.HeatmapsImages, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
-                                            var subDirOverlay = Path.Combine(paths.HeatmapsOverlays, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                        // Create subdirectories for each feature if they don't exist
+                                        var subDirHeatmap = Path.Combine(paths.MasksHeatmaps, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                        Directory.CreateDirectory(subDirHeatmap);
 
-                                            // Create subdirectories for each feature if they don't exist
-                                            Directory.CreateDirectory(subDirHeatmap);
-                                            Directory.CreateDirectory(subDirOverlay);
-
-                                            Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + paths.ImagesExt), heatmap);
-                                            Cv2.ImWrite(Path.Combine(subDirOverlay, img.Guid + paths.ImagesExt), overlay);
-                                        }
-                                        finally
-                                        {
-                                            heatmap.Dispose();
-                                            overlay.Dispose();
-                                        }
+                                        // ToDo: check if cropping is needed here in kv.Value Mat
+                                        Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + paths.ImagesExt), kv.Value[0, image.Height, 0, image.Width]);
                                     }
 
                                     // Segmentation stats

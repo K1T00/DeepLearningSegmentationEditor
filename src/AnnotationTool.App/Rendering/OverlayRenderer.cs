@@ -176,7 +176,7 @@ namespace AnnotationTool.App.Rendering
         /// <summary>
         /// Draws a semi-transparent grayscale mask (e.g. prediction or label).
         /// </summary>
-        public static void DrawMask(Graphics g, Bitmap mask, Viewport viewport, float opacity = 0.5f)
+        public static void DrawAnnotation(Graphics g, Bitmap mask, Viewport viewport, float opacity = 0.7f)
         {
             if (mask == null)
                 return;
@@ -227,12 +227,37 @@ namespace AnnotationTool.App.Rendering
         /// <summary>
         /// Draws a heatmap bitmap aligned with the image.
         /// </summary>
-        public static void DrawHeatmap(Graphics g, Bitmap heatmap, Viewport viewport, float opacity = 0.6f)
+        public static void DrawHeatmap(Graphics g, Bitmap heatmap, Viewport viewport, float opacity = 0.7f)
         {
+            if (heatmap == null)
+                return;
+
             ArgumentNullException.ThrowIfNull(g);
             ArgumentNullException.ThrowIfNull(viewport);
 
-            DrawMask(g, heatmap, viewport, opacity);
+            var rect = viewport.ImageToScreenRect(
+                new RectangleF(0, 0, heatmap.Width, heatmap.Height));
+
+            using var attr = new ImageAttributes();
+
+            // Treat pixels that are exactly black as transparent (your below-threshold pixels)
+            attr.SetColorKey(Color.Black, Color.Black);
+
+            var matrix = new ColorMatrix
+            {
+                Matrix33 = opacity
+            };
+            attr.SetColorMatrix(matrix);
+
+            g.DrawImage(
+                heatmap,
+                Rectangle.Round(rect),
+                0,
+                0,
+                heatmap.Width,
+                heatmap.Height,
+                GraphicsUnit.Pixel,
+                attr);
         }
 
     }

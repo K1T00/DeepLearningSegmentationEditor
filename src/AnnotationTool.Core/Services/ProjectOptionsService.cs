@@ -26,8 +26,7 @@ namespace AnnotationTool.Core.Services
                 { ProjectFolderType.Models, this.options.ModelsSubFolder },
                 { ProjectFolderType.SlicedImages, this.options.SlicedImagesSubFolder },
                 { ProjectFolderType.SlicedMasks, this.options.SlicedMasksSubFolder },
-                { ProjectFolderType.HeatmapsImages, this.options.HeatmapsSubFolder },
-                { ProjectFolderType.HeatmapsOverlays, this.options.HeatmapsOverlaysSubFolder }
+                { ProjectFolderType.MasksHeatmaps, this.options.MasksHeatmapsSubFolder }
             };
         }
 
@@ -120,8 +119,7 @@ namespace AnnotationTool.Core.Services
         public string Results { get; }
         public string SlicedImages { get; }
         public string SlicedMasks { get; }
-        public string HeatmapsImages { get; }
-        public string HeatmapsOverlays { get; }
+        public string MasksHeatmaps { get; }
         public string Models { get; }
         public string ModelSub { get; }
         public string ModelSettingsSub { get; }
@@ -138,8 +136,7 @@ namespace AnnotationTool.Core.Services
             this.Results = options.GetFolderPath(projectRoot, ProjectFolderType.Results);
             this.SlicedImages = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedImages);
             this.SlicedMasks = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedMasks);
-            this.HeatmapsImages = options.GetFolderPath(projectRoot, ProjectFolderType.HeatmapsImages);
-            this.HeatmapsOverlays = options.GetFolderPath(projectRoot, ProjectFolderType.HeatmapsOverlays);
+            this.MasksHeatmaps = options.GetFolderPath(projectRoot, ProjectFolderType.MasksHeatmaps);
             this.Models = options.GetFolderPath(projectRoot, ProjectFolderType.Models);
             this.ModelSub = options.GetModelsSubFileName();
             this.ModelSettingsSub = options.GetTrainingSettingsSubFileName();

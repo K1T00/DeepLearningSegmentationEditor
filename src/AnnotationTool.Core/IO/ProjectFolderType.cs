@@ -10,7 +10,6 @@
         Models,
         SlicedImages,
         SlicedMasks,
-        HeatmapsImages,
-        HeatmapsOverlays
+        MasksHeatmaps
     }
 }

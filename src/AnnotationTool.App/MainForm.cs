@@ -13,40 +13,44 @@ using static AnnotationTool.Core.Utils.BitmapIO;
 using static AnnotationTool.Core.Utils.CoreUtils;
 using static TorchSharp.torch.cuda;
 
+
 namespace AnnotationTool.App
 {
     public partial class MainForm : Form
     {
-        // Data mapped to GUID 
-        private readonly IProjectPresenter projectPresenter;
-        // Runtime service/cache
-        private readonly ImageRepository imagesRepo = new();
+        // ===== Dependencies =====
 
+        // Whole project state
+        private readonly IProjectPresenter projectPresenter;
+
+        private readonly ILoggerFactory loggerFactory;
         private readonly Func<TrainingForm> trainingFormFactory;
         private readonly Func<InferenceForm> inferenceFormFactory;
         private readonly Func<TrainedModelsForm> trainedModelsFormFactory;
-        private readonly ILoggerFactory loggerFactory;
+
+        // ===== Runtime service/cache =====
+        private readonly ImageRepository imagesRepo = new();
+
+        // ===== Rendering + interaction =====
+        private Viewport viewport = new Viewport(1f, PointF.Empty);
         private readonly InteractionModeController interactionModeController = new InteractionModeController();
         private readonly BrushController brushController = new BrushController();
         private readonly ViewportController viewportController = new ViewportController();
-
-        readonly long cpuMemoryBudgetBytes;
-        readonly long gpuMemoryBudgetBytes;
-
-        private Viewport viewport = new Viewport(1f, PointF.Empty);
         private RoiController? roiController;
-        private Guid currentImageGuid;
 
-        private Dictionary<int, Color> currentFeatureColorMap = new Dictionary<int, Color>();
-
-        private List<Feature> currentFeatures = [];
+        // ===== UI state =====
+        private Guid currentSelectedImageGuid = Guid.Empty;
         private Feature? currentSelectedFeature;
         private string currentSelectedModelFileName = "";
         private int currentHeatmapThreshold = 50;
-
         private int currentBrushSize;
         private BrushMode lastClickedBrushMode = BrushMode.None;
         private PipelineLoopState currentPipelineLoopState = PipelineLoopState.Annotation;
+        private Dictionary<int, Color> currentFeatureColorMap = new Dictionary<int, Color>();
+        private List<Feature> currentFeatures = [];
+
+        readonly long cpuMemoryBudgetBytes;
+        readonly long gpuMemoryBudgetBytes;
         private const byte overlayAlpha = 128; // 0-255 Annotation overlay alpha
 
         public MainForm(
@@ -63,6 +67,10 @@ namespace AnnotationTool.App
             this.inferenceFormFactory = inferenceFormFactory!;
             this.loggerFactory = loggerFactory!;
             this.trainedModelsFormFactory = trainedModelsFormFactory!;
+
+            // Bind runtime repository so dirty edits are persisted on repository eviction
+            if (this.projectPresenter is ProjectPresenter pp)
+                pp.BindRepository(this.imagesRepo);
 
             this.imagesControl.ImageSelected += ImageGridControl_ImageSelected;
             this.imagesControl.ImageAdded += ImageGridControl_ImageAdded;
@@ -103,73 +111,14 @@ namespace AnnotationTool.App
 
         #region Methods
 
-        private void RunAnnotation()
-        {
-            currentPipelineLoopState = PipelineLoopState.Annotation;
-
-            var paths = projectPresenter.Paths;
-
-            //Load any saved annotations/ masks by GUID
-            foreach (var it in projectPresenter.Project.Images)
-            {
-                var id = it.Guid;
-                var rt = imagesRepo.GetRuntime(id);
-
-                var annPng = Path.Combine(paths.Annotations, id + paths.ImagesExt);
-                if (File.Exists(annPng))
-                {
-                    using var fs = File.OpenRead(annPng);
-                    using var tmp = Image.FromStream(fs);
-
-                    rt.EnsureAnnotation(tmp.Width, tmp.Height);
-                    rt.WithAnnotation(bmp =>
-                    {
-                        using var g = Graphics.FromImage(bmp);
-                        g.Clear(Color.Transparent);
-                        g.DrawImageUnscaled(tmp, 0, 0);
-                    });
-                }
-            }
-            UpdateButtonsPipeLineLoopState();
-        }
-
         private void FeaturesControl_FeatureSelected(object? sender, Feature feature)
         {
             currentSelectedFeature = feature;
 
-            if (projectPresenter.ProjectPath != null)
-            {
-                var paths = projectPresenter.Paths;
+            if (currentSelectedImageGuid != Guid.Empty)
+                imagesControl.SelectImage(currentSelectedImageGuid);
 
-                // Load any saved heatmaps by GUID
-                foreach (var it in projectPresenter.Project.Images)
-                {
-                    var id = it.Guid;
-                    var rt = imagesRepo.GetRuntime(id);
-
-                    // Get feature subfolder based on selected feature
-                    if (currentSelectedFeature != null)
-                    {
-                        var suffixes = it.SegmentationStats.Keys.Select(k => k.ToString()).ToList();
-                        var featureSubfolder = FindMatchingFolder(paths.HeatmapsImages, currentSelectedFeature.Name, suffixes);
-
-                        if (featureSubfolder != null)
-                        {
-                            var heatPng = Path.Combine(featureSubfolder, id + ".png");
-                            if (File.Exists(heatPng))
-                            {
-                                using var fs = File.OpenRead(heatPng);
-                                using var tmp = Image.FromStream(fs);
-                                // New bitmap is owned by ImagesRepo
-                                rt.SetHeatmap(new Bitmap(tmp));
-                            }
-                        }
-                    }
-
-                    imagesControl.SelectImage(currentImageGuid);
-                    mainPictureBox.Invalidate();
-                }
-            }
+            mainPictureBox.Invalidate();
         }
 
         private void Presenter_ErrorOccured(object? sender, string e)
@@ -191,8 +140,10 @@ namespace AnnotationTool.App
             }
 
             // Clear runtime caches and per-image volatile data
-            currentImageGuid = Guid.Empty;
+            currentSelectedImageGuid = Guid.Empty;
             mainPictureBox.Invalidate();
+
+            // Clear thumbnails (ImageGrid owns and disposes them)
             imagesControl.ClearGrid();
 
             // Load features
@@ -206,6 +157,7 @@ namespace AnnotationTool.App
                 .GroupBy(f => f.ClassId)
                 .ToDictionary(g => g.Key, g => Color.FromArgb(g.First().Argb));
 
+            // Fill image grid
             if (projectPresenter.Project.Images != null)
             {
                 foreach (var it in projectPresenter.Project.Images)
@@ -213,18 +165,14 @@ namespace AnnotationTool.App
                     await Task.Run(() =>
                     {
                         var imgPath = projectPresenter.ResolveImagePath(it.Guid);
-
-                        // Create thumbnail
                         using var originalImage = LoadBitmapUnlocked(imgPath);
-                        var thumbnail = CreateThumbnail(originalImage, imagesControl.Width);
 
+                        var thumb = CreateThumbnail(originalImage, imagesControl.Width);
                         Invoke(new Action(() =>
                         {
-                            imagesControl.AddImage(it.Guid, thumbnail);
+                            imagesControl.AddImage(it.Guid, thumb);
                         }));
                     });
-
-                    // Refresh view
                     imagesControl.UpdateCategory(it.Guid, it.Split);
                 }
             }
@@ -245,7 +193,7 @@ namespace AnnotationTool.App
 
         private void DeepLearningSettingsControl_SettingsChanged(object? sender, EventArgs e)
         {
-            // Force reset so user can run same model again
+            // Reset name so user can run same model again
             currentSelectedModelFileName = "";
             mainPictureBox.Invalidate();
         }
@@ -255,23 +203,15 @@ namespace AnnotationTool.App
             if (e == Guid.Empty)
                 return;
 
-            var item = projectPresenter.Project.Images.FirstOrDefault(i => i.Guid == e);
-            if (item == null)
-                return;
-
-            // Ensure there is a mask for this image (kept by the repo)
-            var rt = imagesRepo.GetRuntime(e);
-            rt.EnsureMask(item.ImageSize.Width, item.ImageSize.Height);
-            rt.EnsureAnnotation(item.ImageSize.Width, item.ImageSize.Height);
-
             // Auto-select the first added image if nothing is selected yet
-            if (currentImageGuid == Guid.Empty)
+            if (currentSelectedImageGuid == Guid.Empty)
                 ImageGridControl_ImageSelected(this, e);
         }
 
         private void mainDisplayPictureBox_Paint(object sender, PaintEventArgs e)
         {
-            var rt = imagesRepo.GetRuntime(currentImageGuid);
+            if (!imagesRepo.TryGetRuntime(currentSelectedImageGuid, out var rt))
+                return;
 
             if (!rt.HasFullImage)
                 return;
@@ -285,17 +225,15 @@ namespace AnnotationTool.App
             // Draw (original) full size image
             OverlayRenderer.DrawImage(g, rt.FullImage, viewport);
 
-            // Draw the annotation overlay or heatmap overlay based on current pipeline state
+            // Draw the semitransparent annotation or heatmap overlay based on current pipeline state
             switch (currentPipelineLoopState)
             {
                 case PipelineLoopState.Annotation:
-
-                    rt.WithAnnotation(bmp => OverlayRenderer.DrawImage(g, bmp, viewport));
+                    rt.MutateAnnotation(bmp => OverlayRenderer.DrawAnnotation(g, bmp, viewport));
                     break;
 
                 case PipelineLoopState.InferenceResults:
-
-                    rt.WithHeatmap(bmp => OverlayRenderer.DrawHeatmap(g, bmp, viewport));
+                    rt.MutateHeatmap(bmp => OverlayRenderer.DrawHeatmap(g, bmp, viewport));
                     break;
             }
 
@@ -347,54 +285,120 @@ namespace AnnotationTool.App
             UpdateInteractionUi();
         }
 
-        private void ImageGridControl_ImageSelected(object? sender, Guid imageGuid)
+        private async void ImageGridControl_ImageSelected(object? sender, Guid imageGuid)
         {
             if (imageGuid == Guid.Empty)
                 return;
-            currentImageGuid = imageGuid;
 
-            try
+            if (!projectPresenter.TryGetImageItem(imageGuid, out var item) || item == null)
+                return;
+
+            currentSelectedImageGuid = imageGuid;
+
+
+            // If user selects image first time it is added to fifo cache, otherwise get from cache
+            var rt = imagesRepo.GetRuntime(item);
+
+            if (!rt.HasFullImage)
             {
-                var rt = imagesRepo.GetRuntime(imageGuid);
-                var imgPath = projectPresenter.ResolveImagePath(imageGuid);
-
-                // Load full image ONCE and hand ownership to ImageRuntime
-                if (!rt.HasFullImage)
+                await Task.Run(() =>
                 {
-                    using var originalImage = LoadBitmapUnlocked(imgPath);
-
-                    rt.SetFullImage((Bitmap)originalImage.Clone());
-                }
-
-                // Reset viewport
-                viewport = new Viewport();
-                viewport.FitToView(rt.FullImage.Size, mainPictureBox.ClientSize);
-
-                var img = projectPresenter.Project.Images.FirstOrDefault(i => i.Guid == currentImageGuid);
-
-                if (img == null)
-                    return;
-
-                // Initialize ROI controller
-                roiController = new RoiController(img.Roi);
-
-                mainPictureBox.Invalidate();
-
-                // Update inference results control for current image if they exist
-                var segRes = img.SegmentationStats.Values.ToList();
-
-                var (macro, micro) = AggregateResults(segRes);
-
-                //Check if any results exist
-                if (!IsAllZero(macro))
-                    inferenceResultsControlCurrentImage.SegmentationStats = macro;
-
+                    var imgPath = projectPresenter.ResolveImagePath(imageGuid);
+                    var bmp = LoadBitmapUnlocked(imgPath);
+                    rt.SetFullImage(bmp);
+                });
             }
-            catch (Exception ex)
+
+            // If project was saved we have to load annotation, masks or heatmaps one time from disk into runtime cache
+            if (!string.IsNullOrEmpty(projectPresenter.ProjectPath))
             {
-                MessageBox.Show($"Error displaying image {imageGuid}: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                var paths = projectPresenter.Paths;
+
+                switch (currentPipelineLoopState)
+                {
+                    case PipelineLoopState.Annotation:
+                        if (!rt.AnnotationLoadedOnce)
+                        {
+                            var annPng = Path.Combine(paths.Annotations, imageGuid + paths.ImagesExt);
+                            var maskPng = Path.Combine(paths.Masks, imageGuid + paths.ImagesExt);
+                            if (File.Exists(annPng))
+                            {
+                                using var fs = File.OpenRead(annPng);
+                                using var tmp = Image.FromStream(fs);
+
+                                rt.MutateAnnotation(bmp =>
+                                {
+                                    using var g = Graphics.FromImage(bmp);
+                                    g.DrawImageUnscaled(tmp, 0, 0);
+                                });
+                                rt.MarkAnnotationClean();
+                            }
+                            if (File.Exists(maskPng) && LabelMask.TryLoadPng8(maskPng, out var lm))
+                            {
+                                rt.MutateMask(m => m.CopyFrom(lm));
+                                rt.MarkMaskClean();
+                            }
+                            rt.AnnotationLoadedOnce = true;
+                        }
+                        break;
+
+                    case PipelineLoopState.InferenceResults:
+
+                        if (currentSelectedFeature != null)
+                        {
+                            // Determine feature folder
+                            var suffixes = item.SegmentationStats.Keys.Select(k => k.ToString()).ToList();
+                            var featureSubfolder = FindMatchingFolder(paths.MasksHeatmaps, currentSelectedFeature.Name, suffixes);
+
+                            if (!string.IsNullOrEmpty(featureSubfolder))
+                            {
+                                var rawHeatPng = Path.Combine(featureSubfolder, imageGuid + paths.ImagesExt);
+
+                                if (File.Exists(rawHeatPng))
+                                {
+                                    // Cache raw certainty map per feature
+                                    if (!rt.HasHeatmapCertainty(currentSelectedFeature.Name))
+                                    {
+                                        var certainty = await Task.Run(() =>
+                                            LoadGrayscalePngToByteArray(rawHeatPng, item.ImageSize.Width, item.ImageSize.Height));
+
+                                        rt.SetHeatmapCertainty(currentSelectedFeature.Name, certainty, item.ImageSize.Width, item.ImageSize.Height);
+                                    }
+
+                                    // Apply threshold from slider (0..100 -> 0..255)
+                                    int thrByte = (int)Math.Round(tBThreshold.Value * 255.0 / 100.0);
+                                    rt.SetHeatmapThreshold(thrByte);
+
+                                    // Generate Turbo bitmap for renderer
+                                    rt.RegenerateHeatmapTurbo(currentSelectedFeature.Name);
+                                }
+                                else
+                                {
+                                    rt.ClearHeatmap();
+                                }
+                            }
+
+                            // Update inference results control for current image if they exist
+                            var segRes = item.SegmentationStats.Values.ToList();
+                            var (macro, micro) = AggregateResults(segRes);
+
+                            //Check if any results exist
+                            if (!IsAllZero(macro))
+                                inferenceResultsControlCurrentImage.SegmentationStats = macro;
+                        }
+                        break;
+                    default:
+                        break;
+                }
             }
+
+            // Initialize ROI controller
+            roiController = new RoiController(item.Roi);
+
+            // Reset viewport and show image at 100% zoom, centered
+            viewport = new Viewport();
+            viewport.FitToView(rt.FullImage.Size, mainPictureBox.ClientSize);
+            mainPictureBox.Invalidate();
         }
 
         private void UpdateButtonsPipeLineLoopState()
@@ -415,49 +419,46 @@ namespace AnnotationTool.App
 
             if (projectPresenter.Project == null)
                 return;
+            if (currentPipelineLoopState != PipelineLoopState.InferenceResults)
+                return;
+            if (currentSelectedImageGuid == Guid.Empty || currentSelectedFeature == null)
+                return;
+            if (!projectPresenter.TryGetImageItem(currentSelectedImageGuid, out var item) || item == null)
+                return;
 
             projectPresenter.Project.Settings.HeatmapThreshold = MapRangeStringToInt(lblThreshold.Text, 0, 100, 0, 255);
+
+            var rt = imagesRepo.GetRuntime(item);
+            if (!rt.HasHeatmapCertainty(currentSelectedFeature.Name))
+                return;
+
+            int thrByte = (int)Math.Round(tBThreshold.Value * 255.0 / 100.0);
+            rt.SetHeatmapThreshold(thrByte);
+            rt.RegenerateHeatmapTurbo(currentSelectedFeature.Name);
+
+            mainPictureBox.Invalidate();
         }
 
-        private async Task UnloadCurrentProjectAsync()
+        private Task UnloadCurrentProjectAsync()
         {
-            await ClearGridAsync();
+            // Clear UI thumbnails
+            if (InvokeRequired)
+                BeginInvoke(new Action(() => imagesControl.ClearGrid()));
+            else
+                imagesControl.ClearGrid();
 
-            // Clear runtime caches and per-image volatile data Bitmap holds GDI handles
-            currentImageGuid = Guid.Empty;
+            // Clear runtime caches
+            imagesRepo.Clear();
+            currentSelectedImageGuid = Guid.Empty;
 
             // Clear UI elems
             inferenceResultsControlAllImages.ClearPlot();
             inferenceResultsControlCurrentImage.ClearPlot();
 
-            // Force GC cleanup of disposed Bitmaps (GDI resources)
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-        }
+            // GC.Collect();
+            // GC.WaitForPendingFinalizers();
 
-        private async Task ClearGridAsync()
-        {
-            List<IDisposable> disposables;
-
-            // Force UI thread
-            if (InvokeRequired)
-            {
-                disposables = (List<IDisposable>)Invoke(
-                    new Func<List<IDisposable>>(
-                        () => imagesControl.ExtractItemsForDisposal()));
-            }
-            else
-            {
-                disposables = imagesControl.ExtractItemsForDisposal();
-            }
-
-            await Task.Run(() =>
-            {
-                foreach (var d in disposables)
-                    d.Dispose();
-            });
-
-            imagesControl.ClearGrid();
+            return Task.CompletedTask;
         }
 
         // Centralized UI update for interaction mode changes
@@ -520,50 +521,37 @@ namespace AnnotationTool.App
                 if (ofd.ShowDialog(this) != DialogResult.OK)
                     return;
 
-                int added = 0, existing = 0, failed = 0;
+                int added = 0, failed = 0;
                 var beforeCount = projectPresenter.Project.Images.Count;
 
-                // Add new images to project
-                foreach (var file in ofd.FileNames)
+                await Task.Run(() =>
                 {
-                    if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+                    foreach (var file in ofd.FileNames)
                     {
-                        failed++;
-                        continue;
-                    }
 
-                    var newItem = projectPresenter.AddImage(file);
-
-                    if (projectPresenter.Project.Images.Count > beforeCount)
-                        added++;
-                    else
-                        existing++;
-
-                    if (newItem == null)
-                        continue;
-
-
-                    await Task.Run(() =>
-                    {
-                        using var originalImage = LoadBitmapUnlocked(newItem.Path);
-
-                        // Always init new image with full Roi
-                        newItem.Roi = new Rectangle(0, 0, originalImage.Width, originalImage.Height);
-                        newItem.ImageSize = new Size(originalImage.Width, originalImage.Height);
-
-                        var thumbnail = CreateThumbnail(originalImage, imagesControl.Width);
-
-                        Invoke(new Action(() =>
+                        if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
                         {
-                            imagesControl.AddImage(newItem.Guid, thumbnail);
+                            failed++;
+                            continue;
+                        }
+                        using var originalImage = LoadBitmapUnlocked(file);
+
+                        // Add new ImageItem DTO to project (with path only) and get back the created item with assigned GUID
+                        var newItem = projectPresenter.AddImage(file, new Size(originalImage.Width, originalImage.Height));
+
+                        if (projectPresenter.Project.Images.Count > beforeCount)
+                            added++;
+                        if (newItem == null)
+                            continue;
+
+                        var thumb = CreateThumbnail(originalImage, imagesControl.Width);
+                        BeginInvoke(new Action(() =>
+                        {
+                            imagesControl.AddImage(newItem.Guid, thumb);
+                            imagesControl.UpdateCategory(newItem.Guid, newItem.Split);
                         }));
-                    });
-
-                    imagesControl.UpdateCategory(newItem.Guid, newItem.Split);
-                }
-
-
-                //await Task.Run(() => { projectPresenter.SaveProject(imagesRepo); });
+                    }
+                });
 
                 // Force reset so user can run same model again
                 currentSelectedModelFileName = "";
@@ -618,16 +606,17 @@ namespace AnnotationTool.App
 
                 foreach (var id in ids)
                 {
-                    await Task.Run(() => { projectPresenter.RemoveImage(id); });
+                    if (currentSelectedImageGuid == id)
+                        currentSelectedImageGuid = Guid.Empty;
 
-                    if (currentImageGuid == id)
-                    {
-                        currentImageGuid = Guid.Empty;
-                    }
+                    await Task.Run(() => { projectPresenter.RemoveImage(id); });
                     imagesRepo.Remove(id);
                 }
 
-                await Task.Run(() => { projectPresenter.SaveProject(imagesRepo); });
+                if (!string.IsNullOrEmpty(projectPresenter.ProjectPath))
+                {
+                    await Task.Run(() => { projectPresenter.SaveProject(imagesRepo); });
+                }
 
                 mainPictureBox.Invalidate();
                 imagesControl.RemoveSelectedImages();
@@ -678,26 +667,8 @@ namespace AnnotationTool.App
                         .Where(f => f.ClassId != 0)
                         .GroupBy(f => f.ClassId)
                         .ToDictionary(g => g.Key, g => Color.FromArgb(g.First().Argb));
-
-
-                    foreach (var img in projectPresenter.Project.Images)
-                    {
-                        var rt = imagesRepo.GetRuntime(img.Guid);
-                        rt.Mask.RemapClasses(classesRemap);
-
-                        rt.WithAnnotation(bmp =>
-                        {
-                            // Re-draw the annotation overlay with updated feature colors
-                            OverlayRenderer.UpdateAnnotationOverlayRegion(
-                                bmp,
-                                rt.Mask,
-                                currentFeatureColorMap,
-                                new Rectangle(0, 0, rt.Mask.Width, rt.Mask.Height),
-                                overlayAlpha);
-                        });
-                    }
                 }
-                if (currentFeatures.Count > 0 & imagesControl.GetImageIds().Count > 0)
+                if (currentFeatures.Count > 0 && imagesControl.GetImageIds().Count > 0)
                 {
                     annotationToolsControl.Visible = true;
                     annotationToolsControl.Enabled = true;
@@ -724,16 +695,12 @@ namespace AnnotationTool.App
 
             try
             {
-                var current = interactionModeController.ActiveMode;
-
-                if (current == InteractionMode.Roi)
+                if (interactionModeController.ActiveMode == InteractionMode.Roi)
                 {
-                    // Toggle ROI off → return to Pan
                     interactionModeController.SetMode(InteractionMode.Pan);
                 }
                 else
                 {
-                    // Toggle ROI on
                     interactionModeController.SetMode(InteractionMode.Roi);
                 }
                 UpdateInteractionUi();
@@ -766,9 +733,9 @@ namespace AnnotationTool.App
                     await UnloadCurrentProjectAsync();
 
                     await Task.Run(() => { projectPresenter.NewProject(sfd.FileName); });
-                    await Task.Run(() => { projectPresenter.LoadProject(sfd.FileName, imagesRepo); });
+                    await Task.Run(() => { projectPresenter.LoadProject(sfd.FileName); });
 
-                    RunAnnotation();
+                    currentPipelineLoopState = PipelineLoopState.Annotation;
                     UpdateButtonsPipeLineLoopState();
 
                     imagesControl.Refresh();
@@ -819,7 +786,6 @@ namespace AnnotationTool.App
                 try
                 {
                     await Task.Run(() => { projectPresenter.SaveProject(imagesRepo); });
-
                     MessageBox.Show("Project saved successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (OperationCanceledException)
@@ -855,7 +821,6 @@ namespace AnnotationTool.App
                     projectPresenter.Project.Name = Path.GetFileNameWithoutExtension(sfd.FileName);
 
                     await Task.Run(() => { projectPresenter.SaveProject(imagesRepo); });
-
                     MessageBox.Show("Project saved successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (OperationCanceledException)
@@ -891,14 +856,15 @@ namespace AnnotationTool.App
                 projectPresenter.Project.Name = ofd.FileName;
                 projectPresenter.ProjectPath = Path.GetDirectoryName(ofd.FileName);
 
-
                 // SHOW progress form
-                var progress = new ProgressForm();
-                progress.Text = "Loading project...";
+                var progress = new ProgressForm
+                {
+                    Text = "Loading project..."
+                };
                 progress.Show(this);
                 progress.Refresh(); // force immediate draw
 
-                await Task.Run(() => { projectPresenter.LoadProject(ofd.FileName, imagesRepo); });
+                await Task.Run(() => { projectPresenter.LoadProject(ofd.FileName); });
 
                 progress.Close();
                 progress = null;
@@ -913,8 +879,14 @@ namespace AnnotationTool.App
                 if (!IsAllZero(macro))
                     inferenceResultsControlAllImages.SegmentationStats = macro;
 
-                RunAnnotation();
+                currentPipelineLoopState = PipelineLoopState.Annotation;
                 UpdateButtonsPipeLineLoopState();
+
+                // Select first image
+                var ids = imagesControl.GetImageIds();
+                if (ids.Count > 0)
+                    imagesControl.SelectImage(ids[0]);
+
             }
             catch (Exception ex)
             {
@@ -957,8 +929,13 @@ namespace AnnotationTool.App
 
             try
             {
-                RunAnnotation();
+                currentPipelineLoopState = PipelineLoopState.Annotation;
                 UpdateButtonsPipeLineLoopState();
+
+                // Select first image
+                var ids = imagesControl.GetImageIds();
+                if (ids.Count > 0)
+                    imagesControl.SelectImage(ids[0]);
             }
             catch (Exception ex)
             {
@@ -987,14 +964,11 @@ namespace AnnotationTool.App
                 }
                 foreach (var id in imagesControl.GetSelectedImageIds())
                 {
-                    var it = projectPresenter.Project.Images.FirstOrDefault(x => x.Guid == id);
-
-                    if (it == null)
-                        continue;
+                    if (!projectPresenter.TryGetImageItem(id, out var it))
+                        return;
 
                     it.Split = DatasetSplit.Train;
-
-                    imagesControl.UpdateCategory(id, DatasetSplit.Train);
+                    imagesControl.UpdateCategory(id, it.Split);
                 }
             }
             catch (Exception ex)
@@ -1021,14 +995,11 @@ namespace AnnotationTool.App
                 }
                 foreach (var id in imagesControl.GetSelectedImageIds())
                 {
-                    var it = projectPresenter.Project.Images.FirstOrDefault(x => x.Guid == id);
-
-                    if (it == null)
-                        continue;
+                    if (!projectPresenter.TryGetImageItem(id, out var it))
+                        return;
 
                     it.Split = DatasetSplit.Validate;
-
-                    imagesControl.UpdateCategory(id, DatasetSplit.Validate);
+                    imagesControl.UpdateCategory(id, it.Split);
                 }
             }
             catch (Exception ex)
@@ -1056,14 +1027,11 @@ namespace AnnotationTool.App
 
                 foreach (var id in imagesControl.GetSelectedImageIds())
                 {
-                    var it = projectPresenter.Project.Images.FirstOrDefault(x => x.Guid == id);
-
-                    if (it == null)
-                        continue;
+                    if (!projectPresenter.TryGetImageItem(id, out var it))
+                        return;
 
                     it.Split = DatasetSplit.Test;
-
-                    imagesControl.UpdateCategory(id, DatasetSplit.Test);
+                    imagesControl.UpdateCategory(id, it.Split);
                 }
             }
             catch (Exception ex)
@@ -1082,7 +1050,6 @@ namespace AnnotationTool.App
 
             try
             {
-                // Save project first
                 if (projectPresenter.ProjectPath == null)
                 {
                     MessageBox.Show("Please save project first.");
@@ -1128,7 +1095,6 @@ namespace AnnotationTool.App
             {
                 currentPipelineLoopState = PipelineLoopState.Training;
                 UpdateButtonsPipeLineLoopState();
-
                 (sender as Button)!.Enabled = true;
             }
         }
@@ -1139,7 +1105,6 @@ namespace AnnotationTool.App
 
             try
             {
-                // Save project first
                 if (projectPresenter.ProjectPath == null)
                 {
                     MessageBox.Show("Please save project first.");
@@ -1158,7 +1123,8 @@ namespace AnnotationTool.App
                 // If user cancels model selection, switch back to annotation mode
                 if (trainedModelsForm.ShowDialog(this) != DialogResult.OK)
                 {
-                    RunAnnotation();
+                    currentPipelineLoopState = PipelineLoopState.Annotation;
+                    UpdateButtonsPipeLineLoopState();
                     return;
                 }
 
@@ -1179,8 +1145,7 @@ namespace AnnotationTool.App
                     // Hide MainForms overlay
                     ShowOverlay();
 
-                    TryDeleteDirectoryContents(paths.HeatmapsImages, out var errImgs);
-                    TryDeleteDirectoryContents(paths.HeatmapsOverlays, out var errOverlays);
+                    TryDeleteDirectoryContents(paths.MasksHeatmaps, out var errOverlays);
 
                     var inferenceForm = inferenceFormFactory();
 
@@ -1190,7 +1155,7 @@ namespace AnnotationTool.App
                     await inferenceForm.StartInferenceRun(projectPresenter, modelPath);
                 }
 
-                // Show statistic results
+                // Show statistic results //
 
                 var (macro, micro) = AggregateResults(projectPresenter.Project.Images.SelectMany(img => img.SegmentationStats.Values).ToList());
 
@@ -1206,46 +1171,16 @@ namespace AnnotationTool.App
                         $"Average compute time: {Math.Round(averageInferenceMs, 0):F1} ms";
                 }
 
-
-                // Show heatmaps
-
-                foreach (var it in projectPresenter.Project.Images)
-                {
-                    var id = it.Guid;
-                    var rt = imagesRepo.GetRuntime(id);
-
-                    // Get feature subfolder based on selected feature
-                    if (currentSelectedFeature != null)
-                    {
-                        var suffixes = it.SegmentationStats.Keys.Select(k => k.ToString()).ToList();
-                        var featureSubfolder = FindMatchingFolder(paths.HeatmapsImages, currentSelectedFeature.Name, suffixes);
-
-                        if (featureSubfolder != null)
-                        {
-                            var heatPng = Path.Combine(featureSubfolder, id + paths.ImagesExt);
-                            if (File.Exists(heatPng))
-                            {
-                                using var fs = File.OpenRead(heatPng);
-                                using var tmp = Image.FromStream(fs);
-
-                                // New bitmap is owned by ImagesRepo
-                                rt.SetHeatmap(new Bitmap(tmp));
-                            }
-                        }
-                    }
-                }
-
-                // Select first image
-                var ids = imagesControl.GetImageIds();
-                if (ids.Count > 0)
-                    imagesControl.SelectImage(ids[0]);
-
                 // Select first feature
                 if (currentFeatures.Count > 0)
                 {
                     featuresControl.SelectFeature(currentFeatures[0]);
                 }
 
+                // Select first image
+                var ids = imagesControl.GetImageIds();
+                if (ids.Count > 0)
+                    imagesControl.SelectImage(ids[0]);
             }
             catch (Exception ex)
             {
@@ -1253,7 +1188,7 @@ namespace AnnotationTool.App
             }
             finally
             {
-                //currentPipelineLoopState = PipelineLoopState.InferenceResults;
+                currentPipelineLoopState = PipelineLoopState.InferenceResults;
                 UpdateButtonsPipeLineLoopState();
 
                 (sender as Button)!.Enabled = true;
@@ -1262,14 +1197,15 @@ namespace AnnotationTool.App
 
         #endregion
 
-        #region Mouse events
+        #region Mouse events on Main PictureBox interactions
 
         private void mainDisplayPictureBox_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left)
                 return;
 
-            var rt = imagesRepo.GetRuntime(currentImageGuid);
+            if (!imagesRepo.TryGetRuntime(currentSelectedImageGuid, out var rt))
+                return;
 
             switch (interactionModeController.ActiveMode)
             {
@@ -1281,27 +1217,18 @@ namespace AnnotationTool.App
                             return;
                         }
 
-                        brushController.BeginStroke(
-                            e.Location,
-                            viewport,
-                            annotationToolsControl.BrushSize,
-                            (byte)currentSelectedFeature.ClassId);
+                        brushController.BeginStroke(e.Location, viewport, annotationToolsControl.BrushSize, (byte)currentSelectedFeature.ClassId);
 
-                        if (brushController.UpdateStroke(
-                            e.Location,
-                            viewport,
-                            imagesRepo.GetRuntime(currentImageGuid).Mask,
-                            out var dirtyImageRect))
+                        if (brushController.UpdateStroke(e.Location, viewport, rt.Mask, out var dirtyImageRect))
                         {
-                            rt.WithAnnotation(bmp =>
+                            rt.MutateAnnotation(bmp =>
                             {
-                                // Ensure annotation overlay is created
                                 OverlayRenderer.UpdateAnnotationOverlayRegion(
                                     bmp,
                                     rt.Mask,
                                     currentFeatureColorMap,
                                     dirtyImageRect,
-                                    overlayAlpha); // alpha
+                                    overlayAlpha);
                             });
 
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
@@ -1311,28 +1238,18 @@ namespace AnnotationTool.App
                     }
                 case InteractionMode.Erase:
                     {
-                        brushController.BeginStroke(
-                            e.Location,
-                            viewport,
-                            annotationToolsControl.BrushSize,
-                            (byte)0); // background
+                        brushController.BeginStroke(e.Location, viewport, annotationToolsControl.BrushSize, (byte)0); // background
 
-                        if (brushController.UpdateStroke(
-                            e.Location,
-                            viewport,
-                            imagesRepo.GetRuntime(currentImageGuid).Mask,
-                            out var dirtyImageRect))
+                        if (brushController.UpdateStroke(e.Location, viewport, rt.Mask, out var dirtyImageRect))
                         {
-
-                            rt.WithAnnotation(bmp =>
+                            rt.MutateAnnotation(bmp =>
                             {
-                                // Ensure annotation overlay is created
                                 OverlayRenderer.UpdateAnnotationOverlayRegion(
                                     bmp,
                                     rt.Mask,
                                     currentFeatureColorMap,
                                     dirtyImageRect,
-                                    overlayAlpha); // alpha
+                                    overlayAlpha);
                             });
 
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
@@ -1371,8 +1288,11 @@ namespace AnnotationTool.App
 
         private void mainDisplayPictureBox_MouseMove(object sender, MouseEventArgs e)
         {
+            if (e.Button != MouseButtons.Left)
+                return;
 
-            var rt = imagesRepo.GetRuntime(currentImageGuid);
+            if (!imagesRepo.TryGetRuntime(currentSelectedImageGuid, out var rt))
+                return;
 
             switch (interactionModeController.ActiveMode)
             {
@@ -1384,15 +1304,14 @@ namespace AnnotationTool.App
 
                         if (brushController.UpdateStroke(e.Location, viewport, rt.Mask, out var dirtyImageRect))
                         {
-                            rt.WithAnnotation(bmp =>
+                            rt.MutateAnnotation(bmp =>
                             {
-                                // Ensure annotation overlay is created
                                 OverlayRenderer.UpdateAnnotationOverlayRegion(
                                     bmp,
                                     rt.Mask,
                                     currentFeatureColorMap,
                                     dirtyImageRect,
-                                    overlayAlpha); // alpha
+                                    overlayAlpha);
                             });
 
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
@@ -1405,10 +1324,7 @@ namespace AnnotationTool.App
                         if (roiController == null)
                             break;
 
-                        roiController.MouseMove(
-                            e.Location,
-                            viewport,
-                            new SizeF(rt.FullImage.Width, rt.FullImage.Height));
+                        roiController.MouseMove(e.Location, viewport, new SizeF(rt.FullImage.Width, rt.FullImage.Height));
 
                         mainPictureBox.Invalidate();
                         break;
@@ -1422,13 +1338,15 @@ namespace AnnotationTool.App
 
                 default:
                     break;
-
             }
         }
 
         private void mainDisplayPictureBox_MouseUp(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left)
+                return;
+
+            if (!imagesRepo.TryGetRuntime(currentSelectedImageGuid, out var rt))
                 return;
 
             // Finalize brush stroke (paint / erase)
@@ -1441,16 +1359,9 @@ namespace AnnotationTool.App
 
                 if (interactionModeController.ActiveMode == InteractionMode.Roi)
                 {
-                    // Commit ROI to project model
-                    var item = projectPresenter.Project.Images
-                        .FirstOrDefault(i => i.Guid == currentImageGuid);
-
-                    if (item != null)
-                    {
-                        item.Roi = roiController.GetRoundedRoi();
-
-                        //currentRoi = item.Roi;
-                    }
+                    if (!projectPresenter.TryGetImageItem(currentSelectedImageGuid, out var it))
+                        return;
+                    it?.Roi = roiController.GetRoundedRoi();
                 }
             }
 
@@ -1466,9 +1377,7 @@ namespace AnnotationTool.App
 
         private void DisplayPictureBox_MouseWheel(object? sender, MouseEventArgs e)
         {
-
             viewportController.Zoom(e.Delta, e.Location, viewport);
-
             mainPictureBox.Invalidate();
         }
 

@@ -44,7 +44,20 @@ namespace AnnotationTool.Ai.Training
 
                     if (ctx.Optimizer.scheduler is ReduceLROnPlateau rlr)
                     {
-                        rlr.step(trainLoss);
+                        // ToDo: Experiment with different metrics for learning rate reduction. Currently using validation loss, which is common practice.
+                        // Typically we want to reduce learning rate based on validation performance.
+                        // But what about small datasets where validation loss can be very noisy? Should we use training loss instead in that case?
+
+                        //rlr.step(trainLoss);
+                        double smoothedValLoss = 1;
+
+                        if (epoch == 1)
+                            smoothedValLoss = valLoss;
+                        else
+                            smoothedValLoss = 0.7 * smoothedValLoss + 0.3 * valLoss;
+                        //smoothedValLoss = 0.8 * smoothedValLoss + 0.2 * valLoss;
+
+                        rlr.step(smoothedValLoss);
                     }
                     else
                     {

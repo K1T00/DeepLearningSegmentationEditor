@@ -14,10 +14,20 @@ namespace AnnotationTool.App.Controls
         private readonly List<Guid> imageIds = [];
         private PictureBox? lastClickedPictureBox;
 
+        private const string ThumbnailPanelName = "thumbnailPanel";
+        private const string ThumbnailPictureBoxName = "thumbnailPictureBox";
+        private const string CategoryLabelName = "categoryLabel";
+        private const string TrainResultLabelName = "trainResultLabel";
 
         public ImageGrid()
         {
             InitializeComponent();
+
+            // Ensure resources are cleaned up on disposal, hooked to the control's Disposed event (in the designer)
+            Disposed += (_, __) =>
+            {
+                try { ClearGrid(); } catch { /* ignore during shutdown */ }
+            };
         }
 
         public bool HasSelectedImages
@@ -25,6 +35,9 @@ namespace AnnotationTool.App.Controls
             get { return selectedPictureBoxes.Count > 0; }
         }
 
+        /// <summary>
+        /// ImageGrid takes ownership of the thumbnail Bitmap and will dispose it when the item is removed/cleared.
+        /// </summary>
         public void AddImage(Guid imageId, Bitmap thumbnail)
         {
             const int labelPosX = 5;
@@ -34,7 +47,7 @@ namespace AnnotationTool.App.Controls
 
             var pictureBox = new PictureBox
             {
-                Name = "thumbnailPictureBox",
+                Name = ThumbnailPictureBoxName,
                 Image = thumbnail,
                 Size = new Size(thumbnail.Width, thumbnail.Height),
                 SizeMode = PictureBoxSizeMode.Zoom,
@@ -45,7 +58,7 @@ namespace AnnotationTool.App.Controls
 
             var categoryLabel = new Label
             {
-                Name = "categoryLabel",
+                Name = CategoryLabelName,
                 AutoSize = true,
                 BackColor = Color.LightGray,
                 ForeColor = Color.Black,
@@ -56,7 +69,7 @@ namespace AnnotationTool.App.Controls
 
             var trainResultLabel = new Label
             {
-                Name = "trainResultLabel",
+                Name = TrainResultLabelName,
                 AutoSize = true,
                 BackColor = Color.Wheat,
                 ForeColor = Color.Black,
@@ -67,7 +80,7 @@ namespace AnnotationTool.App.Controls
 
             var panel = new Panel
             {
-                Name = "thumbnailPanel",
+                Name = ThumbnailPanelName,
                 Size = new Size(thumbnail.Width, thumbnail.Height),
                 Margin = new Padding(padding)
             };
@@ -80,11 +93,13 @@ namespace AnnotationTool.App.Controls
 
             pictureBox.Click += (sender, e) =>
             {
-                if (sender is not PictureBox clickedPb)
-                    return;
+                var clickedPb = sender as PictureBox;
+                if (clickedPb == null) return;
 
                 ToggleSelection(clickedPb);
-                ImageSelected?.Invoke(this, GetImageId(clickedPb));
+
+                var id = GetImageId(clickedPb);
+                ImageSelected?.Invoke(this, id);
             };
 
             pictureBox.Paint += PictureBox_Paint;
@@ -92,7 +107,7 @@ namespace AnnotationTool.App.Controls
             imageGridflowLayoutPanel.Controls.Add(panel);
             imageIds.Add(imageId);
 
-            // Notify MainForm with image dimensions
+            // Notify MainForm
             ImageAdded?.Invoke(this, imageId);
         }
 
@@ -102,17 +117,28 @@ namespace AnnotationTool.App.Controls
 
         public void RemoveSelectedImages()
         {
-            foreach (var pb in selectedPictureBoxes.ToList())
+            // Work on a snapshot because we'll mutate selection state.
+            var selected = selectedPictureBoxes.ToList();
+
+            foreach (var pb in selected)
             {
-                if (pb.Parent is not Panel panel)
+                var panel = pb.Parent as Panel;
+                if (panel == null)
                     continue;
 
                 var id = GetImageId(pb);
+
+                // Detach + dispose the thumbnail bitmap explicitly
+                DisposePictureBoxImage(pb);
+
+                // Remove + dispose controls (UI thread)
                 imageGridflowLayoutPanel.Controls.Remove(panel);
                 panel.Dispose();
+
                 imageIds.Remove(id);
                 selectedPictureBoxes.Remove(pb);
             }
+
             lastClickedPictureBox = null;
         }
 
@@ -142,8 +168,10 @@ namespace AnnotationTool.App.Controls
             if ((ModifierKeys & Keys.Shift) == Keys.Shift && lastClickedPictureBox != null)
             {
                 var boxes = imageGridflowLayoutPanel.Controls.OfType<Panel>()
-                    .Select(p => p.Controls.OfType<PictureBox>().First(pc => pc.Name == "thumbnailPictureBox"))
-                    .ToList();
+                           .Select(GetThumbnailPictureBox)
+                           .Where(pb => pb != null)
+                           .ToList();
+
                 var i1 = boxes.IndexOf(lastClickedPictureBox);
                 var i2 = boxes.IndexOf(clicked);
                 if (i1 > -1 && i2 > -1)
@@ -169,7 +197,7 @@ namespace AnnotationTool.App.Controls
                 return;
 
             // Find the PictureBox inside it
-            var pb = panel.Controls.OfType<PictureBox>().FirstOrDefault(pc => pc.Name == "thumbnailPictureBox");
+            var pb = GetThumbnailPictureBox(panel);
             if (pb == null)
                 return;
 
@@ -180,7 +208,7 @@ namespace AnnotationTool.App.Controls
             SetSelected(pb, true);
             lastClickedPictureBox = pb;
 
-            // Fire the same event as a user click
+
             ImageSelected?.Invoke(this, imageId);
 
             // Refresh UI
@@ -196,53 +224,89 @@ namespace AnnotationTool.App.Controls
 
         public void ClearGrid()
         {
-            foreach (Control c in imageGridflowLayoutPanel.Controls)
-            {
-                c.Dispose();
-            }
-            imageGridflowLayoutPanel.Controls.Clear();
-
-            imageIds.Clear();
-            selectedPictureBoxes.Clear();
-            lastClickedPictureBox = null;
-        }
-
-        public List<IDisposable> ExtractItemsForDisposal()
-        {
-            // Always runs on UI thread
             SuspendLayout();
             imageGridflowLayoutPanel.SuspendLayout();
 
-            var disposables = new List<IDisposable>();
-
-            foreach (Control c in imageGridflowLayoutPanel.Controls)
+            try
             {
-                if (c is PictureBox item)
-                    disposables.Add(item); // item holds Bitmaps
+                foreach (var panel in imageGridflowLayoutPanel.Controls.OfType<Panel>().ToList())
+                {
+                    var pb = GetThumbnailPictureBox(panel);
+                    if (pb != null)
+                        DisposePictureBoxImage(pb);
+
+                    panel.Dispose();
+                }
+
+                imageGridflowLayoutPanel.Controls.Clear();
+                imageIds.Clear();
+                selectedPictureBoxes.Clear();
+                lastClickedPictureBox = null;
+            }
+            finally
+            {
+                imageGridflowLayoutPanel.ResumeLayout();
+                ResumeLayout();
+            }
+        }
+
+        /// <summary>
+        /// Controls are disposed here (on the UI thread) only the Bitmaps are returned to be desposed on worker thread
+        /// </summary>
+        public List<Bitmap> ExtractThumbnailsForDisposal()
+        {
+            // UI-thread only
+            SuspendLayout();
+            imageGridflowLayoutPanel.SuspendLayout();
+
+            var thumbnails = new List<Bitmap>();
+
+            try
+            {
+                foreach (var panel in imageGridflowLayoutPanel.Controls.OfType<Panel>().ToList())
+                {
+                    var pb = GetThumbnailPictureBox(panel);
+                    if (pb != null)
+                    {
+                        var bmp = pb.Image as Bitmap;
+                        pb.Image = null; // detach to avoid paint/use-after-dispose
+                        if (bmp != null)
+                            thumbnails.Add(bmp);
+                    }
+
+                    panel.Dispose();
+                }
+
+                imageGridflowLayoutPanel.Controls.Clear();
+
+                imageIds.Clear();
+                selectedPictureBoxes.Clear();
+                lastClickedPictureBox = null;
+            }
+            finally
+            {
+                imageGridflowLayoutPanel.ResumeLayout();
+                ResumeLayout();
             }
 
-            imageGridflowLayoutPanel.Controls.Clear();
-
-            imageGridflowLayoutPanel.ResumeLayout();
-            ResumeLayout();
-
-            return disposables;
+            return thumbnails;
         }
 
         private Panel? FindPanelById(Guid imageId)
         {
-            return imageGridflowLayoutPanel.Controls.OfType<Panel>().FirstOrDefault(
-                p =>
+            return imageGridflowLayoutPanel.Controls
+                .OfType<Panel>()
+                .FirstOrDefault(p =>
                 {
-                    var pb = p.Controls.OfType<PictureBox>().FirstOrDefault(pc => pc.Name == "thumbnailPictureBox");
+                    var pb = GetThumbnailPictureBox(p);
                     return pb != null && GetImageId(pb) == imageId;
                 });
         }
 
         private void PictureBox_Paint(object? sender, PaintEventArgs e)
         {
-            if (sender is not PictureBox pb)
-                return;
+            var pb = sender as PictureBox;
+            if (pb == null) return;
 
             if (!selectedPictureBoxes.Contains(pb))
                 return;
@@ -257,7 +321,7 @@ namespace AnnotationTool.App.Controls
             var panel = FindPanelById(imageId);
             if (panel == null) return;
 
-            var label = panel.Controls.OfType<Label>().FirstOrDefault(l => l.Name == "categoryLabel");
+            var label = panel.Controls.OfType<Label>().FirstOrDefault(l => l.Name == CategoryLabelName);
             if (label == null) return;
 
             label.Text = category.ToString();
@@ -273,7 +337,7 @@ namespace AnnotationTool.App.Controls
             if (panel == null)
                 return;
 
-            var label = panel.Controls.OfType<Label>().FirstOrDefault(l => l.Name == "trainResultLabel");
+            var label = panel.Controls.OfType<Label>().FirstOrDefault(l => l.Name == TrainResultLabelName);
             if (label == null)
                 return;
 
@@ -290,6 +354,22 @@ namespace AnnotationTool.App.Controls
             return id;
         }
 
+        private static PictureBox GetThumbnailPictureBox(Panel panel)
+        {
+            var pb = panel.Controls
+                .OfType<PictureBox>()
+                .FirstOrDefault(pc => pc.Name == ThumbnailPictureBoxName);
+
+            return pb ?? throw new InvalidOperationException(
+                    $"Panel '{panel.Name}' does not contain a '{ThumbnailPictureBoxName}'.");
+        }
+
+        private static void DisposePictureBoxImage(PictureBox pb)
+        {
+            var img = pb.Image;
+            pb.Image = null;
+            img?.Dispose();
+        }
 
     }
 }

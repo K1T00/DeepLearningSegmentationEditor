@@ -2,7 +2,6 @@
 using AnnotationTool.Core.Services;
 using OpenCvSharp;
 using System.Collections.Generic;
-using TorchSharp;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
 using static TorchSharp.torch;
 
@@ -32,7 +31,7 @@ namespace AnnotationTool.Ai.Utils
             this.transforms = transforms;
             this.project = project;
             this.cfg = cfg;
-            this.count = ReadFiles();
+            this.count = ReadFiles(); // ToDo: Lazy loading of files instead of reading all at once. Maybe optionall based on size of dataset.
         }
 
         private int ReadFiles()
@@ -90,7 +89,7 @@ namespace AnnotationTool.Ai.Utils
         /// <returns>Tensors of index.</returns>
         public override Dictionary<string, Tensor> GetTensor(long index)
         {
-            using (var scope = torch.NewDisposeScope())
+            using (var scope = NewDisposeScope())
             {
                 var image = data[(int)index];
                 var mask = masks[(int)index];

@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace AnnotationTool.Core.Models
+﻿namespace AnnotationTool.Core.Models
 {
     /// <summary>
     /// // Wrapper to save relevant metadata (that may be used for sdk)

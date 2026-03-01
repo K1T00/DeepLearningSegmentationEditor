@@ -30,6 +30,8 @@ namespace AnnotationTool.Core.Services
         private ProjectPaths paths;
         private string projectPath;
 
+        // Bound repository to MainForm's ImageRepository (Workaround for when ImageRepo fifo buffer runs out of space ...)
+        private ImageRepository boundRepo;
 
         public ProjectPresenter(JsonSerializerOptions jsonOptions, IProjectOptionsService projectOptionsService)
         {
@@ -74,7 +76,25 @@ namespace AnnotationTool.Core.Services
             }
         }
 
-        public void LoadProject(string jsonPath, ImageRepository imagesRepo)
+        /// <summary>
+        /// Call this once from App after you create your ImageRepository, so the presenter can
+        /// save dirty runtimes when the repo evicts them.
+        /// </summary>
+        public void BindRepository(ImageRepository repo)
+        {
+            if (ReferenceEquals(boundRepo, repo))
+                return;
+
+            if (boundRepo != null)
+                boundRepo.RuntimeEvicting -= OnRuntimeEvicting;
+
+            boundRepo = repo;
+
+            if (boundRepo != null)
+                boundRepo.RuntimeEvicting += OnRuntimeEvicting;
+        }
+
+        public void LoadProject(string jsonPath)
         {
             try
             {
@@ -93,46 +113,8 @@ namespace AnnotationTool.Core.Services
 
                 Project.CopyFrom(loadedTemp);
 
-                // Clear runtime data
-                imagesRepo.Clear();
-
                 if (Project.Images == null)
                     return;
-
-                foreach (var it in Project.Images)
-                {
-                    var id = it.Guid;
-                    var rt = imagesRepo.GetRuntime(id);
-                    var imgPng = Path.Combine(paths.Images, id + paths.ImagesExt);
-                    var annPng = Path.Combine(paths.Annotations, id + paths.ImagesExt);
-                    var maskPng = Path.Combine(paths.Masks, id + paths.ImagesExt);
-
-                    // Load annotation bitmap if present
-                    if (File.Exists(annPng))
-                    {
-                        using (var fs = File.OpenRead(annPng))
-                        using (var tmp = Image.FromStream(fs))
-                        {
-                            rt.EnsureAnnotation(tmp.Width, tmp.Height);
-
-                            rt.WithAnnotation(bmp =>
-                            {
-                                using (var g = Graphics.FromImage(bmp))
-                                {
-                                    g.DrawImageUnscaled(tmp, 0, 0);
-                                }
-                            });
-                        }
-                    }
-
-                    // Load label mask if present
-                    if (File.Exists(maskPng))
-                    {
-                        LabelMask.TryLoadPng8(maskPng, out var lm);
-                        rt.EnsureMask(lm.Width, lm.Height);
-                        rt.Mask.CopyFrom(lm);
-                    }
-                }
 
                 ProjectLoaded?.Invoke(this, EventArgs.Empty);
             }
@@ -179,7 +161,6 @@ namespace AnnotationTool.Core.Services
                 foreach (var item in Project.Images)
                 {
                     var id = item.Guid;
-                    var rt = imagesRepo.GetRuntime(id);
 
                     // All source images are expected to be in this folder, if not -> copy from original path to project folder
                     var imgProjectPath = Path.Combine(paths.Images, id + paths.ImagesExt);
@@ -199,16 +180,19 @@ namespace AnnotationTool.Core.Services
                     }
                     item.Path = imgProjectPath;
 
-                    // Save annotations
+                    // Save annotations/masks
                     var annPath = Path.Combine(paths.Annotations, id + paths.ImagesExt);
-                    rt.WithAnnotation(bmp =>
-                    {
-                        bmp.Save(annPath, ImageFormat.Png);
-                    });
-
-                    // Save masks
                     var maskPath = Path.Combine(paths.Masks, id + paths.ImagesExt);
-                    LabelMask.SavePng8(maskPath, rt.Mask);
+
+                    // If runtime exists, persist from it (prefer dirty-only)
+                    if (imagesRepo != null && imagesRepo.TryGetRuntime(id, out var rt))
+                    {
+                        SaveRuntimeIfDirtyOrMissingFiles(rt, annPath, maskPath);
+                        continue;
+                    }
+                    // Ensure annotation/mask files exist. If missing, create blank ones.
+                    EnsureBlankAnnotationExists(item, annPath);
+                    EnsureBlankMaskExists(item, maskPath);
                 }
                 // Save json project file
                 var json = JsonSerializer.Serialize(Project, jsonOptions);
@@ -220,11 +204,17 @@ namespace AnnotationTool.Core.Services
             }
         }
 
-        public ImageItem AddImage(string imageSourcePath)
+        public ImageItem AddImage(string imageSourcePath, Size imageSize)
         {
             try
             {
-                var item = new ImageItem() { Path = imageSourcePath };
+                var item = new ImageItem()
+                {
+                    Path = imageSourcePath,
+                    ImageSize = imageSize,
+                    Roi = new Rectangle(0, 0, imageSize.Width, imageSize.Height), // Always init new image with full Roi
+                    Split = DatasetSplit.Train, // Default to train split, user can change it later
+                };
                 Project.Images.Add(item);
 
                 return item;
@@ -353,5 +343,102 @@ namespace AnnotationTool.Core.Services
             return imgPath;
         }
 
+        public bool TryGetImageItem(Guid id, out ImageItem imageItem)
+        {
+            if (Project?.Images == null)
+            {
+                imageItem = null;
+                return false;
+            }
+
+            imageItem = Project.Images.FirstOrDefault(i => i.Guid == id);
+            return imageItem != null;
+        }
+
+        private void OnRuntimeEvicting(Guid id, ImageRuntime rt)
+        {
+            // If we don't have a saved project yet, we have nowhere to persist.
+            // ToDo: We could consider forcing a save at this point, but for now just skip persistence on eviction if project not saved yet.
+            if (string.IsNullOrWhiteSpace(ProjectPath))
+                return;
+
+            if (rt == null)
+                return;
+
+            if (!rt.IsAnnotationDirty && !rt.IsMaskDirty)
+                return;
+
+            if (!TryGetImageItem(id, out var item) || item == null)
+                return;
+
+            var paths = Paths;
+
+            var annPath = Path.Combine(paths.Annotations, id + paths.ImagesExt);
+            var maskPath = Path.Combine(paths.Masks, id + paths.ImagesExt);
+
+            try
+            {
+                SaveRuntimeIfDirtyOrMissingFiles(rt, annPath, maskPath);
+            }
+            catch (Exception ex)
+            {
+                // Don't throw: eviction must proceed. But we should notify.
+                ErrorOccured?.Invoke(this, $"Failed to persist evicted runtime {id}: {ex.Message}");
+            }
+        }
+
+        private void SaveRuntimeIfDirtyOrMissingFiles(ImageRuntime rt, string annPath, string maskPath)
+        {
+            // Annotation
+            if (rt.IsAnnotationDirty || !File.Exists(annPath))
+            {
+                rt.ReadAnnotation(bmp =>
+                {
+                    // Ensure folder exists (should, but robust)
+                    Directory.CreateDirectory(Path.GetDirectoryName(annPath));
+                    bmp.Save(annPath, ImageFormat.Png);
+                });
+
+                rt.MarkAnnotationClean();
+            }
+
+            // Mask
+            if (rt.IsMaskDirty || !File.Exists(maskPath))
+            {
+                rt.ReadMask(m =>
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(maskPath));
+                    LabelMask.SavePng8(maskPath, m);
+                });
+
+                rt.MarkMaskClean();
+            }
+        }
+
+        private void EnsureBlankAnnotationExists(ImageItem item, string annPath)
+        {
+            if (File.Exists(annPath))
+                return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(annPath));
+
+            using (var bmp = new Bitmap(item.ImageSize.Width, item.ImageSize.Height, PixelFormat.Format32bppArgb))
+            {
+                // Transparent by default; no need to clear
+                bmp.Save(annPath, ImageFormat.Png);
+            }
+        }
+
+        private void EnsureBlankMaskExists(ImageItem item, string maskPath)
+        {
+            if (File.Exists(maskPath))
+                return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(maskPath));
+
+            // Create an empty mask (all zeros)
+            var blank = new LabelMask(item.ImageSize.Width, item.ImageSize.Height);
+            LabelMask.SavePng8(maskPath, blank);
+        }
     }
 }

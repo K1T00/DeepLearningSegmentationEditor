@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 
@@ -330,5 +331,71 @@ namespace AnnotationTool.Core.Utils
 
         public static ImageItem FindById(DeepLearningProject project, Guid id)
             => project.Images.FirstOrDefault(i => i.Guid == id);
+
+        public static byte[] LoadGrayscalePngToByteArray(string path, int width, int height)
+        {
+            using (var fs = File.OpenRead(path))
+            {
+                using (var bmp = (Bitmap)Image.FromStream(fs))
+                {
+
+                    if (bmp.Width != width || bmp.Height != height)
+                        throw new InvalidOperationException($"Heatmap size mismatch: {bmp.Width}x{bmp.Height} vs expected {width}x{height}");
+
+                    var result = new byte[width * height];
+                    var rect = new Rectangle(0, 0, width, height);
+
+                    // PNG may decode as 8bpp indexed or 24/32bpp
+                    var data = bmp.LockBits(rect, ImageLockMode.ReadOnly, bmp.PixelFormat);
+                    try
+                    {
+                        unsafe
+                        {
+                            byte* src0 = (byte*)data.Scan0;
+                            int stride = data.Stride;
+
+                            bool is8bpp = bmp.PixelFormat == PixelFormat.Format8bppIndexed;
+                            bool is24bpp = bmp.PixelFormat == PixelFormat.Format24bppRgb;
+                            bool is32bpp = bmp.PixelFormat == PixelFormat.Format32bppArgb
+                                        || bmp.PixelFormat == PixelFormat.Format32bppRgb
+                                        || bmp.PixelFormat == PixelFormat.Format32bppPArgb;
+
+                            for (int y = 0; y < height; y++)
+                            {
+                                byte* row = src0 + y * stride;
+                                int dstIdx = y * width;
+
+                                if (is8bpp)
+                                {
+                                    System.Runtime.InteropServices.Marshal.Copy((IntPtr)row, result, dstIdx, width);
+                                }
+                                else if (is24bpp)
+                                {
+                                    for (int x = 0; x < width; x++)
+                                        result[dstIdx + x] = row[x * 3 + 2]; // R (grayscale => R=G=B)
+                                }
+                                else if (is32bpp)
+                                {
+                                    for (int x = 0; x < width; x++)
+                                        result[dstIdx + x] = row[x * 4 + 2]; // R
+                                }
+                                else
+                                {
+                                    throw new NotSupportedException($"Unsupported pixel format: {bmp.PixelFormat}");
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        bmp.UnlockBits(data);
+                    }
+
+                    return result;
+                }
+            }
+
+
+        }
     }
 }
