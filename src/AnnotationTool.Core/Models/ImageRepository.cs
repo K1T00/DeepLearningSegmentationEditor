@@ -1,182 +1,230 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.IO;
 
 namespace AnnotationTool.Core.Models
 {
     /// <summary>
+    /// Runtime cache for ImageRuntime instances keyed by image Guid.
+    /// Fixed-size FIFO cache: when capacity is exceeded, the oldest inserted entry is evicted and disposed.
+    /// Thread-safe via lock.
     /// 
-    /// Runtime service/cache (what’s in memory right now) for full-resolution images and masks, keyed by image Guid.
-    /// Owns disposable resources (full-res Bitmaps, GDI), mask buffers (LabelMask) and tools (MaskCanvas).
-    /// Deals with file I/O for loading images, caching, and lifecycle(Dispose).
-    /// Can add thumbnails, cache eviction, thread safety, async loading later—without touching the JSON model.
-    /// 
+    /// IMPORTANT: Includes event that raises before disposing an evicted ImageRuntime, allowing subscribers to save any pending changes before eviction.
     /// </summary>
     public sealed class ImageRepository : IDisposable
     {
+        private readonly int capacity;
+        private readonly Dictionary<Guid, ImageRuntime> runtimeRepo;
+        private readonly LinkedList<Guid> fifoOrder = new LinkedList<Guid>();
+        private readonly Dictionary<Guid, LinkedListNode<Guid>> fifoNodes;
+        private readonly object repoLock = new object();
+        private bool disposed;
 
-        public sealed class ImageRuntime
+        /// <summary>
+        /// Raised immediately before a runtime is disposed due to eviction/remove/clear.
+        /// Raised OUTSIDE the repo lock.
+        /// Subscriber (e.g. ProjectPresenter) can persist dirty mask/annotation here.
+        /// </summary>
+        public event Action<Guid, ImageRuntime> RuntimeEvicting;
+
+        public ImageRepository(int capacity = 200)
         {
-            public Bitmap FullImage { get; set; }
-            public Bitmap Annotation { get; set; }
-            public LabelMask Mask { get; set; }
-            public Bitmap Heatmap { get; set; }
-
-            // Synchronization locks for resources that may be accessed concurrently
-            public readonly object AnnotationLock = new object();
-            public readonly object HeatmapLock = new object();
-        }
-
-        private readonly Dictionary<Guid, ImageRuntime> rtRepo = new Dictionary<Guid, ImageRuntime>();
-
-
-        // Get (or create) the runtime bucket for an image id.
-        public ImageRuntime GetRuntime(Guid id)
-        {
-            if (!rtRepo.TryGetValue(id, out var rt))
-            {
-                rt = new ImageRuntime();
-                rtRepo[id] = rt;
-            }
-            return rt;
+            this.capacity = capacity;
+            this.runtimeRepo = new Dictionary<Guid, ImageRuntime>(capacity);
+            this.fifoNodes = new Dictionary<Guid, LinkedListNode<Guid>>(capacity);
         }
 
         /// <summary>
-        /// Load and cache the full-res bitmap for <paramref name="id"/> from <paramref name="absolutePath"/>.
-        /// Returns an unlocked 32bpp clone and lazily ensures a LabelMask + Annotation sized to the image.
+        /// Gets (or creates) the ImageRuntime for the given image item DTO.
+        /// Ensures mask and annotation exist.
         /// </summary>
-        public Bitmap EnsureFull(Guid id, string absolutePath)
+        public ImageRuntime GetRuntime(ImageItem imageItem)
         {
-            var rt = GetRuntime(id);
+            if (imageItem == null) throw new ArgumentNullException(nameof(imageItem));
 
-            if (rt.FullImage != null)
-                return rt.FullImage;
-
-            if (!File.Exists(absolutePath))
-                throw new FileNotFoundException("Image not found", absolutePath);
-
-
-
-
-            using (var tmp = Image.FromFile(absolutePath))
+            return GetOrCreate(imageItem.Guid, () =>
             {
-                rt.FullImage = new Bitmap(tmp);
-            }
+                var rt = new ImageRuntime();
 
-            // Ensure annotation + mask exist
-            EnsureAnnotationAndMask(rt);
+                rt.EnsureMask(imageItem.ImageSize.Width, imageItem.ImageSize.Height);
+                rt.EnsureAnnotation(imageItem.ImageSize.Width, imageItem.ImageSize.Height);
 
-
-            return rt.FullImage;
+                return rt;
+            });
         }
 
-        private static void EnsureAnnotationAndMask(ImageRuntime rt)
+        public bool TryGetRuntime(Guid id, out ImageRuntime runtime)
         {
-            if (rt.FullImage == null)
-                return;
+            ThrowIfDisposed();
 
-            int w = rt.FullImage.Width;
-            int h = rt.FullImage.Height;
-
-            if (rt.Mask == null)
-                rt.Mask = CreateEmptyMask(w, h);
-
-            if (rt.Annotation == null)
+            lock (repoLock)
             {
-                lock (rt.AnnotationLock)
+                return runtimeRepo.TryGetValue(id, out runtime);
+            }
+        }
+
+        public bool Remove(Guid id)
+        {
+            if (disposed)
+                return false;
+
+            ImageRuntime rt = null;
+
+            lock (repoLock)
+            {
+                if (!runtimeRepo.TryGetValue(id, out rt))
+                    return false;
+
+                runtimeRepo.Remove(id);
+
+                if (fifoNodes.TryGetValue(id, out var node))
                 {
-                    if (rt.Annotation == null)
-                        rt.Annotation = CreateAnnotationBitmap(w, h);
+                    fifoNodes.Remove(id);
+                    fifoOrder.Remove(node);
                 }
             }
+
+            // Notify + Dispose outside lock
+            NotifyEvicting(id, rt);
+            rt.Dispose();
+            return true;
         }
 
-        /// <summary>
-        /// Ensure a mask and annotation(for visualization) exists for <paramref name="id"/> with the given size and a bound MaskCanvas.
-        /// </summary>
-        public (LabelMask, Bitmap) GetOrCreateAnnotationMask(Guid id, int width, int height)
+        public void Clear()
         {
-            var rt = GetRuntime(id);
-            if (rt.Mask == null || rt.Mask.Width != width || rt.Mask.Height != height)
-                rt.Mask = new LabelMask(width, height);
-
-            if (rt.Annotation == null)
-            {
-                rt.Annotation = CreateAnnotationBitmap(width, height);
-            }
-            return (rt.Mask, rt.Annotation);
-        }
-
-        private static Bitmap CreateAnnotationBitmap(int width, int height)
-        {
-            return new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        }
-
-        private static LabelMask CreateEmptyMask(int w, int h)
-        {
-            return new LabelMask(w, h);
-        }
-
-        public void SetHeatmap(Guid imageGuid, Bitmap newHeatmap)
-        {
-            var rt = GetRuntime(imageGuid);
-
-            lock (rt.HeatmapLock)
-            {
-                rt.Heatmap?.Dispose();
-                rt.Heatmap = newHeatmap;
-            }
-        }
-
-        /// <summary>Dispose and forget runtime resources for a single image id.</summary>
-        public void DisposeRuntime(Guid imageGuid)
-        {
-            ImageRuntime rt;
-            if (!rtRepo.TryGetValue(imageGuid, out rt))
+            if (disposed)
                 return;
 
-            lock (rt.AnnotationLock)
+            List<(Guid id, ImageRuntime rt)> toDispose;
+
+            lock (repoLock)
             {
-                rt.Annotation?.Dispose();
-                rt.Annotation = null;
+                toDispose = new List<(Guid, ImageRuntime)>(runtimeRepo.Count);
+                foreach (var kvp in runtimeRepo)
+                    toDispose.Add((kvp.Key, kvp.Value));
+
+                runtimeRepo.Clear();
+                fifoOrder.Clear();
+                fifoNodes.Clear();
             }
 
-            lock (rt.HeatmapLock)
+            // Notify + Dispose outside lock
+            foreach (var e in toDispose)
             {
-                rt.Heatmap?.Dispose();
-                rt.Heatmap = null;
+                NotifyEvicting(e.id, e.rt);
+                e.rt.Dispose();
             }
-
-            rt.FullImage?.Dispose();
-            rt.FullImage = null;
-
-            rt.Mask = null;
-
-            rtRepo.Remove(imageGuid);
         }
 
         public void Dispose()
         {
-            foreach (var kv in rtRepo)
+            if (disposed) return;
+            Clear();
+            disposed = true;
+        }
+
+        /// <summary>
+        /// Gets an existing runtime or creates/inserts one if missing.
+        /// If insertion exceeds capacity, evicts the oldest inserted runtime.
+        /// </summary>
+        private ImageRuntime GetOrCreate(Guid id, Func<ImageRuntime> factory)
+        {
+            ThrowIfDisposed();
+            if (factory == null) throw new ArgumentNullException(nameof(factory));
+
+            // Fast path: check existing
+            lock (repoLock)
             {
-                var rt = kv.Value;
-
-                lock (rt.AnnotationLock)
-                {
-                    rt.Annotation?.Dispose();
-                }
-
-                lock (rt.HeatmapLock)
-                {
-                    rt.Heatmap?.Dispose();
-                }
-
-                rt.FullImage?.Dispose();
+                if (runtimeRepo.TryGetValue(id, out var existing))
+                    return existing;
             }
 
-            rtRepo.Clear();
+            // Create outside lock
+            ImageRuntime created = null;
+            try
+            {
+                created = factory();
+            }
+            catch
+            {
+                created?.Dispose();
+                throw;
+            }
+
+            ImageRuntime result;
+            List<(Guid id, ImageRuntime rt)> toDispose = null;
+
+            lock (repoLock)
+            {
+                // Another thread might have created it while we were outside the lock.
+                if (runtimeRepo.TryGetValue(id, out var existing))
+                {
+                    result = existing;
+                }
+                else
+                {
+                    result = created;
+                    created = null;
+
+                    runtimeRepo[id] = result;
+                    var node = fifoOrder.AddLast(id);
+                    fifoNodes[id] = node;
+
+                    while (runtimeRepo.Count > capacity)
+                    {
+                        var oldestNode = fifoOrder.First;
+                        if (oldestNode == null)
+                            break;
+
+                        var oldestId = oldestNode.Value;
+
+                        fifoOrder.RemoveFirst();
+                        fifoNodes.Remove(oldestId);
+
+                        if (runtimeRepo.TryGetValue(oldestId, out var evicted))
+                        {
+                            runtimeRepo.Remove(oldestId);
+
+                            if (toDispose == null) toDispose = new List<(Guid, ImageRuntime)>(1);
+                            toDispose.Add((oldestId, evicted));
+                        }
+                    }
+                }
+            }
+
+            // If we lost the race and didn't insert created, dispose it
+            created?.Dispose();
+
+            // Notify + dispose evicted runtimes outside lock
+            if (toDispose != null)
+            {
+                foreach (var e in toDispose)
+                {
+                    NotifyEvicting(e.id, e.rt);
+                    e.rt.Dispose();
+                }
+            }
+
+            return result;
         }
+
+        private void NotifyEvicting(Guid id, ImageRuntime rt)
+        {
+            try
+            {
+                RuntimeEvicting?.Invoke(id, rt);
+            }
+            catch
+            {
+                // Important: eviction must not be blocked by subscriber failures.
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+                throw new ObjectDisposedException(nameof(ImageRepository));
+        }
+
+
     }
 }

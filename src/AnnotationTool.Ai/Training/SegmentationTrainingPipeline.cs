@@ -4,6 +4,7 @@ using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using Microsoft.Extensions.Logging;
 using System;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -53,19 +54,26 @@ namespace AnnotationTool.Ai.Training
             this.complexityProvider = complexityProvider;
         }
 
-        public async Task RunTraining(IProjectPresenter project, IProgress<LossReport> lossProgress, CancellationToken ct)
+        public async Task RunTraining(
+            IProjectPresenter project,
+            IProgress<LossReport> lossProgress,
+            CancellationToken ct,
+            long cpuMemoryBudgetBytes,
+            long gpuMemoryBudgetBytes)
         {
             try
             {
                 device = ResolveDevice(project.Project.Settings);
-
                 logger.LogInformation("Starting training on: " + device);
+
+                var imgsPath = project.Paths.Images;
+                var imgsExt = project.Paths.ImagesExt;
 
                 // Compute normalization statistics
                 project.Project.Settings.PreprocessingSettings.Normalization =
                     project.Project.Settings.PreprocessingSettings.TrainAsGreyscale
-                    ? ComputeGreyStats(project.Project.Images.Select(i => i.Path))
-                    : ComputeRgbStats(project.Project.Images.Select(i => i.Path));
+                    ? ComputeGreyStats(project.Project.Images.Select(i => Path.Combine(imgsPath, i.Guid + imgsExt)))
+                    : ComputeRgbStats(project.Project.Images.Select(i => Path.Combine(imgsPath, i.Guid + imgsExt)));
 
                 // Build training config based on model complexity
                 var cfg = complexityProvider.GetConfig(
@@ -74,7 +82,7 @@ namespace AnnotationTool.Ai.Training
                     project.Project.Settings.PreprocessingSettings.SliceSize);
 
                 // Build dataset + dataloaders (+ augmentations)
-                var (trainLoader, valLoader) = BuildDataLoaders(project, device, cfg);
+                var (trainLoader, valLoader) = BuildDataLoaders(project, device, cfg, cpuMemoryBudgetBytes, gpuMemoryBudgetBytes);
 
                 var model = modelFactory.Create(project.Project, device, cfg);
                 var optimizer = BuildOptimizer(model, project.Project.Settings);
@@ -108,14 +116,19 @@ namespace AnnotationTool.Ai.Training
             }
         }
 
-        private (DataLoader trainLoader, DataLoader valLoader) BuildDataLoaders(IProjectPresenter project, Device device, SegmentationModelConfig cfg)
+        private (DataLoader trainLoader, DataLoader valLoader) BuildDataLoaders(
+            IProjectPresenter project,
+            Device device,
+            SegmentationModelConfig cfg,
+            long cpuMemoryBudgetBytes,
+            long gpuMemoryBudgetBytes)
         {
             var nWorkers = 4;
 
             var availableMemory =
-                    project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Gpu ?
-                    project.Project.GpuMemoryBudgetBytes :
-                    project.Project.CpuMemoryBudgetBytes;
+                project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Gpu
+                ? gpuMemoryBudgetBytes
+                : cpuMemoryBudgetBytes;
 
             // Note: Batch size variation (450+50 -> 250+250) does not skew results significantly, so we use a fixed optimizer type for estimation
             // But BatchNorm2d should be used with a minimum batch size
@@ -139,14 +152,17 @@ namespace AnnotationTool.Ai.Training
                 batchSize = AdjustBatchSizeIfNecessary(batchSize, trainPairs.Count, MinBatchForBatchNorm);
             }
 
+            // Build datasets according to augmentation mode
             Dataset finalTrainDataset = null;
+
+            // Validation dataset is not augmented in any mode, but we still need to apply preprocessing (e.g. normalization)
             var validationDataSet = new SegmentationDataset(valPairs, project, device, augmentations, cfg);
 
             switch (project.Project.Settings.AugmentationSettings.AugmentationMode)
             {
                 case AugmentationMode.Standard:
 
-                    finalTrainDataset = new SegmentationDataset(project.GetSlicedTrainingPairs(DatasetSplit.Train), project, device, augmentations, cfg);
+                    finalTrainDataset = new SegmentationDataset(trainPairs, project, device, augmentations, cfg);
 
                     break;
                 case AugmentationMode.Duplication:

@@ -5,10 +5,10 @@ namespace AnnotationTool.App.Controls
 {
     public partial class AnnotationToolsPanel : UserControl
     {
-        public event EventHandler<InteractionMode> ModeRequested;
-        public event EventHandler<int> BrushSizeChanged;
+        public event EventHandler<InteractionMode>? ModeRequested;
+        public event EventHandler<int>? BrushSizeChanged;
 
-        public BrushMode LastClickedBrushMode { get; private set; }
+        public BrushMode LastClickedBrushMode { get; private set; } = BrushMode.None;
 
         public int BrushSize => tbBrushSize.Value;
 
@@ -17,15 +17,14 @@ namespace AnnotationTool.App.Controls
         {
             InitializeComponent();
             lbBrushSize.Text = tbBrushSize.Value.ToString();
-            this.LastClickedBrushMode = BrushMode.None;
         }
 
-        private void btnPaint_Click(object sender, EventArgs e)
+        private void btnPaint_Click(object? sender, EventArgs e)
         {
             ModeRequested?.Invoke(this, InteractionMode.Paint);
         }
 
-        private void btnEraser_Click(object sender, EventArgs e)
+        private void btnEraser_Click(object? sender, EventArgs e)
         {
             ModeRequested?.Invoke(this, InteractionMode.Erase);
         }
@@ -43,21 +42,21 @@ namespace AnnotationTool.App.Controls
                 : Properties.Resources.Eraser;
         }
 
-        private void tbBrushSize_ValueChanged(object sender, EventArgs e)
+        private void tbBrushSize_ValueChanged(object? sender, EventArgs e)
         {
             lbBrushSize.Text = tbBrushSize.Value.ToString();
-            BrushSizeChanged.Invoke(this, tbBrushSize.Value);
+            BrushSizeChanged?.Invoke(this, tbBrushSize.Value);
         }
 
-        private void tbBrushSize_MouseDown(object sender, MouseEventArgs e)
+        private void tbBrushSize_MouseDown(object? sender, MouseEventArgs e)
         {
             LastClickedBrushMode = BrushMode.MouseDown;
         }
 
-        private void tbBrushSize_MouseUp(object sender, MouseEventArgs e)
+        private void tbBrushSize_MouseUp(object? sender, MouseEventArgs e)
         {
             LastClickedBrushMode = BrushMode.MouseUp;
-            BrushSizeChanged.Invoke(this, tbBrushSize.Value);
+            BrushSizeChanged?.Invoke(this, tbBrushSize.Value);
         }
     }
 }

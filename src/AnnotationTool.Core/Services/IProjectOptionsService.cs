@@ -26,5 +26,9 @@ namespace AnnotationTool.Core.Services
         string GetModelsSubFileName();
 
         string GetTrainingSettingsSubFileName();
+
+        string GetImageExtension();
+
+        string GetModelExtension();
     }
 }

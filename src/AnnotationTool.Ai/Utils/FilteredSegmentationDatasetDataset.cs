@@ -35,7 +35,7 @@ namespace AnnotationTool.Ai.Utils
             this.transforms = transforms;
             this.project = project;
             this.cfg = cfg;
-            count = ReadFiles();
+            this.count = ReadFiles();
         }
 
         private int ReadFiles()

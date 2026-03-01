@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 
 namespace AnnotationTool.Core.Models
 {
@@ -11,41 +12,38 @@ namespace AnnotationTool.Core.Models
     /// </summary>
     public sealed class DeepLearningProject
     {
+        public string Name { get; set; } = string.Empty;
+
         public List<ImageItem> Images { get; set; } = new List<ImageItem>();
 
         public List<Feature> Features { get; set; } = new List<Feature>();
 
         public DeepLearningSettings Settings { get; set; } = new DeepLearningSettings();
 
-        public long CpuMemoryBudgetBytes { get; set; }
-
-        public long GpuMemoryBudgetBytes { get; set; }
-
         public DeepLearningProject()
         {
-
         }
 
         public void CopyFrom(DeepLearningProject other)
         {
             if (other == null) return;
 
-            this.Features = other.Features;
-            this.Images = other.Images;
+            this.Features = other.Features.ToList() ?? new List<Feature>();
+            this.Images = other.Images.ToList() ?? new List<ImageItem>();
             this.Settings.CopyFrom(other.Settings);
         }
     }
 
     public sealed class ImageItem
     {
-        /// <summary>Stable id for cross-referencing bitmaps, masks, etc.</summary>
+        /// <summary>Stable id for cross-referencing</summary>
         public Guid Guid { get; set; } = Guid.NewGuid();
 
-        /// <summary>Absolute or project-relative path to the source image.</summary>
+        /// <summary>
+        /// Path to image file. Should only be used for transition original source files to project.
+        /// Use relative paths + GUID + extension
+        /// </summary>
         public string Path { get; set; } = string.Empty;
-
-        /// <summary>Optional path to the mask on disk (PNG-8 palette recommended). If empty, mask is managed in-memory.</summary>
-        public string MaskPath { get; set; }
 
         public Size ImageSize { get; set; }
 

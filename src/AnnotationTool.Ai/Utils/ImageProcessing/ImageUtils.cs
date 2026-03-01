@@ -1,11 +1,6 @@
-﻿using AnnotationTool.Core.Services;
-using OpenCvSharp;
+﻿using OpenCvSharp;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using static AnnotationTool.Ai.Utils.ImageProcessing.ImageAnalysis;
 
 namespace AnnotationTool.Ai.Utils.ImageProcessing
 {
@@ -74,6 +69,7 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
             }
         }
 
+        // Left here because might need it later for debugging/visualization, but not currently used in training/inference.
         public static unsafe (Mat superImposed, Mat heatmap) ImageToHeatmap(Mat img, Mat mask, int threshold)
         {
             // Convert grayscale to RGB if needed

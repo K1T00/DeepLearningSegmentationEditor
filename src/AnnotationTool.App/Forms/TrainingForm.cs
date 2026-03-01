@@ -1,5 +1,4 @@
 ﻿using AnnotationTool.Ai.Training;
-using AnnotationTool.Core.IO;
 using AnnotationTool.Core.Logging;
 using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
@@ -18,7 +17,7 @@ namespace AnnotationTool.App.Forms
         private readonly SegmentationTrainingPipeline pipeline;
         private readonly IProjectOptionsService projectOptionsService;
         private readonly ILogger<TrainingForm> logger;
-        private CancellationTokenSource cts;
+        private CancellationTokenSource? cts;
         private DataLogger? trainLossLogger;
         private DataLogger? validationLossLogger;
 
@@ -39,7 +38,7 @@ namespace AnnotationTool.App.Forms
             this.logger = logger;
         }
 
-        public async Task StartTrainingRun(IProjectPresenter projectPresenter)
+        public async Task StartTrainingRun(IProjectPresenter projectPresenter, long cpuMemoryBudgetBytes, long gpuMemoryBudgetBytes)
         {
             btnClose.Enabled = false;
             btnStopTraining.Enabled = true;
@@ -61,21 +60,15 @@ namespace AnnotationTool.App.Forms
             {
                 // Create folder structure if missing and get paths and clean up any old slices
                 projectOptionsService.EnsureAll(projectPresenter.ProjectPath);
-                var slicedImgDir = projectOptionsService.GetFolderPath(projectPresenter.ProjectPath, ProjectFolderType.SlicedImages);
-                var slicedMaskDir = projectOptionsService.GetFolderPath(projectPresenter.ProjectPath, ProjectFolderType.SlicedMasks);
-                PrepareOutputDirectory(slicedImgDir);
-                PrepareOutputDirectory(slicedMaskDir);
 
-                // Preprocess
+                var paths = projectPresenter.Paths;
+
                 await Task.Run(() =>
                 {
-                    GenerateTrainingTiles(
-                        projectPresenter,
-                        slicedImgDir,
-                        slicedMaskDir,
-                        progress,
-                        cts.Token
-                        );
+                    PrepareOutputDirectory(paths.SlicedImages);
+                    PrepareOutputDirectory(paths.SlicedMasks);
+
+                    GenerateTrainingTiles(projectPresenter, progress, cts.Token);
                 }, cts.Token);
 
                 logger.LogInformation("Preprocessing complete! Ready to train.");
@@ -88,10 +81,12 @@ namespace AnnotationTool.App.Forms
                 trainLossProgressReport.ProgressChanged += ProcessLossData;
 
                 // Train
-                await Task.Run(async () =>
-                {
-                    await pipeline.RunTraining(projectPresenter, trainLossProgressReport, cts.Token);
-                }, cts.Token);
+                await Task.Run(() => pipeline.RunTraining(
+                    projectPresenter,
+                    trainLossProgressReport,
+                    cts.Token,
+                    cpuMemoryBudgetBytes,
+                    gpuMemoryBudgetBytes), cts.Token);
 
                 logger.LogInformation("Training finished!");
             }
@@ -197,7 +192,8 @@ namespace AnnotationTool.App.Forms
 
         private void btnStopTraining_Click(object sender, EventArgs e)
         {
-            tbLogTrainForm.AppendText(Environment.NewLine + "Stopping, please wait ...");
+            if (!tbLogTrainForm.IsDisposed)
+                tbLogTrainForm.AppendText(Environment.NewLine + "Stopping, please wait ...");
 
             btnStopTraining.Enabled = false;
             cts?.Cancel();

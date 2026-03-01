@@ -2,7 +2,6 @@
 using AnnotationTool.Ai.Inference.Decoders;
 using AnnotationTool.Ai.Models;
 using AnnotationTool.Ai.Processing;
-using AnnotationTool.Core.IO;
 using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using Microsoft.Extensions.Logging;
@@ -23,13 +22,12 @@ namespace AnnotationTool.Ai.Inference
     /// <summary>
     /// Universal inference pipeline that works for ANY model that implements ISegmentationModel.
     /// 
-    /// Currently runs inference on project.Project.Images one by one
+    /// Currently runs inference on project.Project.Images one by one (ToDo: run batch sized)
     /// </summary>
     public class SegmentationInferencePipeline : ISegmentationInferencePipeline
     {
         private readonly ISegmentationModelFactory modelFactory;
         private readonly ILogger<SegmentationInferencePipeline> logger;
-        private readonly IProjectOptionsService projectOptionsService;
         private readonly IModelComplexityConfigProvider complexityProvider;
 
         public SegmentationInferencePipeline(
@@ -40,25 +38,22 @@ namespace AnnotationTool.Ai.Inference
         {
             this.modelFactory = modelFactory;
             this.logger = logger;
-            this.projectOptionsService = projectOptionsService;
             this.complexityProvider = complexityProvider;
         }
 
         public async Task RunInference(IProjectPresenter project, string modelPath, IProgress<int> progress, CancellationToken ct)
         {
-
             var device = new Device(project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Cpu
                 ? DeviceType.CPU
                 : DeviceType.CUDA);
+
+            var paths = project.Paths;
 
             try
             {
                 var segmentationMode = project.Project.Features.Count == 1
                     ? SegmentationMode.Binary
                     : SegmentationMode.Multiclass;
-
-                var heatmapImagesPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsImages);
-                var heatmapOverlaysPath = projectOptionsService.GetFolderPath(project.ProjectPath, ProjectFolderType.HeatmapsOverlays);
 
                 var cfg = complexityProvider.GetConfig(
                     project.Project.Settings.TrainModelSettings.ModelComplexity,
@@ -82,6 +77,9 @@ namespace AnnotationTool.Ai.Inference
                             {
                                 ct.ThrowIfCancellationRequested();
 
+                                var imagePath = Path.Combine(paths.Images, img.Guid + paths.ImagesExt);
+                                var maskPath = Path.Combine(paths.Masks, img.Guid + paths.ImagesExt);
+
                                 var imgSpace = new SegmentationImageSpace(
                                     new OpenCvSharp.Size(img.ImageSize.Width, img.ImageSize.Height),
                                     new OpenCvSharp.Rect(img.Roi.X, img.Roi.Y, img.Roi.Width, img.Roi.Height),
@@ -92,8 +90,8 @@ namespace AnnotationTool.Ai.Inference
                                 var preProc = new SegmentationPreprocessor(imgSpace);
                                 var postProc = new SegmentationPostprocessor(imgSpace);
 
-                                using (var image = LoadImage(img.Path, project))
-                                using (var maskGt = Cv2.ImRead(img.MaskPath, ImreadModes.Grayscale))
+                                using (var image = LoadImage(imagePath, project))
+                                using (var maskGt = Cv2.ImRead(maskPath, ImreadModes.Grayscale))
                                 {
                                     var sw = Stopwatch.StartNew();
 
@@ -117,35 +115,19 @@ namespace AnnotationTool.Ai.Inference
                                     }
                                     sw.Stop();
 
-
-                                    //Visualization
+                                    // Save mask result for later heatmap visualization and metrics computation
                                     foreach (var kv in fullMaskPredictions)
                                     {
-                                        // Create visualization
-                                        var (heatmap, overlay) =
-                                            ImageToHeatmap(
-                                                image,
-                                                kv.Value[0, image.Height, 0, image.Width],
-                                                project.Project.Settings.HeatmapThreshold);
-                                        try
-                                        {
-                                            var subDirHeatmap = Path.Combine(heatmapImagesPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
-                                            var subDirOverlay = Path.Combine(heatmapOverlaysPath, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
-                                            Directory.CreateDirectory(subDirHeatmap);
-                                            Directory.CreateDirectory(subDirOverlay);
-                                            Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + ".png"), heatmap);
-                                            Cv2.ImWrite(Path.Combine(subDirOverlay, img.Guid + ".png"), overlay);
-                                        }
-                                        finally
-                                        {
-                                            heatmap.Dispose();
-                                            overlay.Dispose();
-                                        }
+                                        // Create subdirectories for each feature if they don't exist
+                                        var subDirHeatmap = Path.Combine(paths.MasksHeatmaps, project.Project.Features[kv.Key - 1].Name + "_" + kv.Key.ToString());
+                                        Directory.CreateDirectory(subDirHeatmap);
+
+                                        // ToDo: check if cropping is needed here in kv.Value Mat
+                                        Cv2.ImWrite(Path.Combine(subDirHeatmap, img.Guid + paths.ImagesExt), kv.Value[0, image.Height, 0, image.Width]);
                                     }
 
                                     // Segmentation stats
                                     img.SegmentationStats = decoder.ComputeMetrics(fullMaskPredictions, maskGt);
-
                                     img.InferenceMs = sw.Elapsed.TotalMilliseconds;
 
                                     DisposeTiles(imgTiles);

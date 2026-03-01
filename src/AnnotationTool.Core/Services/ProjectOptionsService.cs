@@ -26,8 +26,7 @@ namespace AnnotationTool.Core.Services
                 { ProjectFolderType.Models, this.options.ModelsSubFolder },
                 { ProjectFolderType.SlicedImages, this.options.SlicedImagesSubFolder },
                 { ProjectFolderType.SlicedMasks, this.options.SlicedMasksSubFolder },
-                { ProjectFolderType.HeatmapsImages, this.options.HeatmapsSubFolder },
-                { ProjectFolderType.HeatmapsOverlays, this.options.HeatmapsOverlaysSubFolder }
+                { ProjectFolderType.MasksHeatmaps, this.options.MasksHeatmapsSubFolder }
             };
         }
 
@@ -39,6 +38,16 @@ namespace AnnotationTool.Core.Services
             }
 
             return relative;
+        }
+
+        public string GetImageExtension()
+        {
+            return options.ImageExtension;
+        }
+
+        public string GetModelExtension()
+        {
+            return options.ModelExtension;
         }
 
         public string GetFolderPath(string projectRoot, ProjectFolderType type)
@@ -100,4 +109,41 @@ namespace AnnotationTool.Core.Services
             return options.TrainingSettingsFileName;
         }
     }
+
+    public sealed class ProjectPaths
+    {
+        public string Root { get; }
+        public string Images { get; }
+        public string Masks { get; }
+        public string Annotations { get; }
+        public string Results { get; }
+        public string SlicedImages { get; }
+        public string SlicedMasks { get; }
+        public string MasksHeatmaps { get; }
+        public string Models { get; }
+        public string ModelSub { get; }
+        public string ModelSettingsSub { get; }
+        public string JsonPath { get; }
+        public string ImagesExt { get; }
+        public string ModelExt { get; }
+
+        public ProjectPaths(string projectRoot, string projectName, IProjectOptionsService options)
+        {
+            this.Root = projectRoot;
+            this.Images = options.GetFolderPath(projectRoot, ProjectFolderType.Images);
+            this.Masks = options.GetFolderPath(projectRoot, ProjectFolderType.Masks);
+            this.Annotations = options.GetFolderPath(projectRoot, ProjectFolderType.Annotations);
+            this.Results = options.GetFolderPath(projectRoot, ProjectFolderType.Results);
+            this.SlicedImages = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedImages);
+            this.SlicedMasks = options.GetFolderPath(projectRoot, ProjectFolderType.SlicedMasks);
+            this.MasksHeatmaps = options.GetFolderPath(projectRoot, ProjectFolderType.MasksHeatmaps);
+            this.Models = options.GetFolderPath(projectRoot, ProjectFolderType.Models);
+            this.ModelSub = options.GetModelsSubFileName();
+            this.ModelSettingsSub = options.GetTrainingSettingsSubFileName();
+            this.JsonPath = Path.Combine(projectRoot, projectName + ".json");
+            this.ImagesExt = options.GetImageExtension();
+            this.ModelExt = options.GetModelExtension();
+        }
+    }
+
 }

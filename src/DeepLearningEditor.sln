@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.1.11312.151 d18.0
+VisualStudioVersion = 18.1.11312.151
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Ai", "AnnotationTool.Ai\AnnotationTool.Ai.csproj", "{C2E7F256-EAC8-4FB7-9862-F7A859953E32}"
 EndProject
@@ -11,7 +11,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.App", "Annot
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.InferenceSdk", "AnnotationTool.InferenceSdk\AnnotationTool.InferenceSdk.csproj", "{8E19EB69-A7DB-43AD-AF9B-D0D141B3DEA9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.InferenceSdk.Tests", "AnnotationTool.InferenceSdk.Tests\AnnotationTool.InferenceSdk.Tests.csproj", "{8A0E4474-DD83-42F4-8AED-7CA83244EED9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnnotationTool.Tests", "AnnotationTool.InferenceSdk.Tests\AnnotationTool.Tests.csproj", "{8A0E4474-DD83-42F4-8AED-7CA83244EED9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

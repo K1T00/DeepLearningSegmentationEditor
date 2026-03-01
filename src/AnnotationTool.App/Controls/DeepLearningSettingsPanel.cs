@@ -6,8 +6,8 @@ namespace AnnotationTool.App.Controls
 
     public partial class DeepLearningSettingsPanel : UserControl
     {
-        public event EventHandler SettingsChanged;
-        private IProjectPresenter presenter;
+        public event EventHandler? SettingsChanged;
+        private IProjectPresenter? presenter; // ToDo: ? not correct here
 
         public DeepLearningSettingsPanel()
         {
@@ -25,11 +25,7 @@ namespace AnnotationTool.App.Controls
             };
         }
 
-        // For constructor chaining because parameterless constructor is required for designer.
-        public DeepLearningSettingsPanel(IProjectPresenter presenter) : this()
-        {
-            Initialize(presenter);
-        }
+        public bool ForceCpuOnly { get; set; } = false;
 
         public void Initialize(IProjectPresenter presenter)
         {
@@ -39,33 +35,22 @@ namespace AnnotationTool.App.Controls
             pgDeepLearningSettings.ExpandAllGridItems();
         }
 
-        public bool ForceCpuOnly { get; set; } = false;
-        //public bool ForceModelComplexity{ get; set; } = false;
-
-        private void PgDeepLearningSettings_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
+        private void PgDeepLearningSettings_PropertyValueChanged(object? s, PropertyValueChangedEventArgs e)
         {
-            if (ForceCpuOnly && e.ChangedItem.PropertyDescriptor.Name == "Device")
+            if (presenter == null)
+                return;
+
+            if (ForceCpuOnly && e!.ChangedItem!.PropertyDescriptor!.Name! == "Device")
             {
                 presenter.Project.Settings.TrainModelSettings.Device = ComputeDevice.Cpu;
 
                 // Snap UI back
                 pgDeepLearningSettings.Refresh();
 
-                MessageBox.Show("GPU acceleration is disabled on this system because CUDA GPU is not available.", "Cuda not abailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("GPU acceleration is disabled on this system because CUDA is not available.", "Cuda not abailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 return; // do not propagate change to SettingsChanged
             }
-            //if (ForceModelComplexity && e.ChangedItem.PropertyDescriptor.Name == "ModelComplexity")
-            //{
-            //    presenter.Project.Settings.TrainModelSettings.ModelComplexity = ModelComplexity.Medium;
-
-            //    // Snap UI back
-            //    pgDeepLearningSettings.Refresh();
-
-            //    MessageBox.Show("Feature not implemented yet", "Feature model complexity", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-            //    return; // do not propagate change to SettingsChanged
-            //}
 
             SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -79,6 +64,12 @@ namespace AnnotationTool.App.Controls
             }
 
             pgDeepLearningSettings.SelectedObject = presenter.Project.Settings;
+
+            if (ForceCpuOnly)
+            {
+                presenter.Project.Settings.TrainModelSettings.Device = ComputeDevice.Cpu;
+            }
+
             pgDeepLearningSettings.Refresh();
 
             if (this.IsHandleCreated)
@@ -121,7 +112,7 @@ namespace AnnotationTool.App.Controls
             }
         }
 
-        private void ExpandRecursive(GridItem item)
+        private static void ExpandRecursive(GridItem item)
         {
             try { item.Expanded = true; } catch { }
 

@@ -1,5 +1,4 @@
 ﻿using AnnotationTool.Core.Models;
-using System.Windows.Forms;
 using static AnnotationTool.Core.Utils.CoreUtils;
 
 namespace AnnotationTool.App.Forms
@@ -7,7 +6,7 @@ namespace AnnotationTool.App.Forms
     public partial class FeaturesEditor : Form
     {
 
-        private List<Feature>? features;
+        private readonly List<Feature> features;
 
 
         public FeaturesEditor(List<Feature> currentFeatures)
@@ -15,10 +14,10 @@ namespace AnnotationTool.App.Forms
             InitializeComponent();
 
             this.features = new List<Feature>(currentFeatures);
-            SetupUi(currentFeatures);
+            SetupUi();
         }
 
-        private void SetupUi(List<Feature> currentFeatures)
+        private void SetupUi()
         {
             lbTrainFeatures.Items.AddRange(features.ToArray());
         }
@@ -35,9 +34,11 @@ namespace AnnotationTool.App.Forms
 
             e.DrawBackground();
 
-            var f = (Feature)lbTrainFeatures.Items[e.Index];
+            if (lbTrainFeatures.Items[e.Index] is not Feature f)
+                return;
 
             var textColor = GetContrastTextColor(Color.FromArgb(f.Argb));
+            var font = e.Font ?? lbTrainFeatures.Font;
 
             using (Brush backBrush = new SolidBrush(Color.FromArgb(f.Argb)))
             {
@@ -46,13 +47,13 @@ namespace AnnotationTool.App.Forms
 
             using (Brush textBrush = new SolidBrush(textColor))
             {
-                e.Graphics.DrawString(f.Name, e.Font, textBrush, e.Bounds.X + 1, e.Bounds.Y + 1);
+                e.Graphics.DrawString(f.Name, font, textBrush, e.Bounds.X + 1, e.Bounds.Y + 1);
             }
 
             e.DrawFocusRectangle();
         }
 
-        private static string ShowInputBox(string prompt, string title, string defaultValue = "")
+        private static string? ShowInputBox(string prompt, string title, string defaultValue = "")
         {
             using var form = new Form { Width = 300, Height = 150, Text = title };
 
@@ -83,7 +84,7 @@ namespace AnnotationTool.App.Forms
             return features.Max(f => f.ClassId) + 1;
         }
 
-        private void ReassignClassIds(IList<Feature> features)
+        private static void ReassignClassIds(IList<Feature> features)
         {
             byte next = 1; // 0 is background
 
@@ -102,24 +103,23 @@ namespace AnnotationTool.App.Forms
 
             try
             {
-                var name = Invoke((Func<string>)(() => ShowInputBox("Enter feature name:", "Add Feature")));
+                var name = ShowInputBox("Enter feature name:", "Add Feature");
                 if (string.IsNullOrWhiteSpace(name))
                     return;
 
                 if (features.Any(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Invoke((Action)(() =>
-                    MessageBox.Show($"A feature named '{name}' already exists.", "Duplicate Feature",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning)));
+                    MessageBox.Show(
+                        $"A feature named '{name}' already exists.",
+                        "Duplicate Feature",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                     return;
                 }
 
                 // Pick color
-                var cd = new ColorDialog();
-                var dialogResult = Invoke((Func<DialogResult>)(() => cd.ShowDialog()));
-
-                if (dialogResult != DialogResult.OK)
+                using var cd = new ColorDialog();
+                if (cd.ShowDialog() != DialogResult.OK)
                     return;
 
                 // ID is non-zero because zero is reserved for "no feature"/background
@@ -129,12 +129,8 @@ namespace AnnotationTool.App.Forms
                     Name = name,
                     Argb = cd.Color.ToArgb()
                 };
-
-                Invoke((Action)(() =>
-                {
-                    features.Add(feature);
-                    lbTrainFeatures.Items.Add(feature);
-                }));
+                features.Add(feature);
+                lbTrainFeatures.Items.Add(feature);
             }
             catch (Exception ex)
             {
@@ -220,7 +216,7 @@ namespace AnnotationTool.App.Forms
                 if (lbTrainFeatures.SelectedItem != null)
                 {
                     var f = (Feature)lbTrainFeatures.SelectedItem;
-                    var cd = new ColorDialog { Color = Color.FromArgb(f.Argb) };
+                    using var cd = new ColorDialog { Color = Color.FromArgb(f.Argb) };
                     if (cd.ShowDialog() == DialogResult.OK)
                     {
                         f.Argb = cd.Color.ToArgb();
@@ -248,8 +244,8 @@ namespace AnnotationTool.App.Forms
 
             try
             {
-                this.DialogResult = DialogResult.OK;
-                this.Close();
+                DialogResult = DialogResult.OK;
+                Close();
             }
             catch (Exception ex)
             {

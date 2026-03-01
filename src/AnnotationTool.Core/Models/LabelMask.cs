@@ -215,7 +215,8 @@ namespace AnnotationTool.Core.Models
             lm = null;
             if (!File.Exists(path)) return false;
 
-            using (var srcBmp = (Bitmap)Image.FromFile(path))
+            using (var fs = File.OpenRead(path))
+            using (var srcBmp = (Bitmap)Image.FromStream(fs))
             {
                 // Force 8bpp indexed clone
                 using (var bmp = srcBmp.PixelFormat == PixelFormat.Format8bppIndexed
@@ -245,6 +246,18 @@ namespace AnnotationTool.Core.Models
                 }
             }
             return true;
+        }
+
+        public void CopyFrom(LabelMask other)
+        {
+            if (other == null)
+                throw new ArgumentNullException(nameof(other));
+
+            if (other.Width != Width || other.Height != Height)
+                throw new ArgumentException(
+                    "Source LabelMask dimensions do not match target.");
+
+            Buffer.BlockCopy(other.Data, 0, Data, 0, Data.Length);
         }
 
     }

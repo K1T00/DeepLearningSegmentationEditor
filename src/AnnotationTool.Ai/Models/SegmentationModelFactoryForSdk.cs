@@ -1,7 +1,5 @@
 ﻿using AnnotationTool.Ai.Models.UNet;
 using AnnotationTool.Core.Models;
-using TorchSharp;
-using TorchSharp.Modules;
 using static TorchSharp.torch;
 using static TorchSharp.torch.nn;
 

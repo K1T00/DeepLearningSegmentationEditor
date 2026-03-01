@@ -5,16 +5,16 @@ namespace AnnotationTool.App.Controls
 {
     public partial class FeaturesDisplay : UserControl
     {
-        public event EventHandler<Feature> FeatureSelected;
+        public event EventHandler<Feature>? FeatureSelected;
 
-        private Label selectedLabel;
+        private Label? selectedLabel;
 
         public FeaturesDisplay()
         {
             InitializeComponent();
         }
 
-        public Feature SelectedFeature { get; private set; }
+        public Feature? SelectedFeature { get; private set; }
 
         public void UpdateFeatures(List<Feature> features)
         {
@@ -40,7 +40,9 @@ namespace AnnotationTool.App.Controls
 
                 label.Click += (sender, e) =>
                 {
-                    var clicked = (Label)sender;
+                    if (sender is not Label clicked)
+                        return;
+
                     ToggleSelection(clicked);
                 };
 
@@ -67,9 +69,9 @@ namespace AnnotationTool.App.Controls
         private void ToggleSelection(Label clicked)
         {
             selectedLabel = clicked;
-            SelectedFeature = (Feature)clicked.Tag;
+            SelectedFeature = GetFeature(clicked);
 
-            foreach (Label lb in featuresGridLayoutPanel.Controls)
+            foreach (var lb in featuresGridLayoutPanel.Controls.OfType<Label>())
             {
                 lb.Invalidate();
             }
@@ -79,15 +81,22 @@ namespace AnnotationTool.App.Controls
 
         public void SelectFeature(Feature feature)
         {
-            foreach (Label lb in featuresGridLayoutPanel.Controls)
+            foreach (var lb in featuresGridLayoutPanel.Controls.OfType<Label>())
             {
-                var f = (Feature)lb.Tag;
+                var f = GetFeature(lb);
                 if (f.ClassId == feature.ClassId)
                 {
                     ToggleSelection(lb);
                     return;
                 }
             }
+        }
+
+        private static Feature GetFeature(Label label)
+        {
+            if (label.Tag is not Feature f)
+                throw new InvalidOperationException("Label.Tag must contain a Feature.");
+            return f;
         }
     }
 }

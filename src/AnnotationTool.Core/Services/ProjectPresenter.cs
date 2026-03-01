@@ -1,5 +1,4 @@
-﻿using AnnotationTool.Core.IO;
-using AnnotationTool.Core.Models;
+﻿using AnnotationTool.Core.Models;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -7,101 +6,115 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
-using static AnnotationTool.Core.Services.ProjectStore;
 using static AnnotationTool.Core.Utils.CoreUtils;
 
 
 namespace AnnotationTool.Core.Services
 {
+    /// <summary>
+    /// Runtime project presenter/manager.
+    /// </summary>
     public class ProjectPresenter : IProjectPresenter
     {
+        /// <summary>
+        /// Gets the deep learning project associated with this instance.
+        /// </summary>
+        public DeepLearningProject Project { get; private set; }
+
+
         public event EventHandler ProjectLoaded;
         public event EventHandler<string> ErrorOccured;
 
-        private readonly IImageService imageService;
         private readonly JsonSerializerOptions jsonOptions;
         private readonly IProjectOptionsService projectOptionsService;
+        private ProjectPaths paths;
+        private string projectPath;
 
-        public ProjectPresenter(IImageService imageService, JsonSerializerOptions jsonOptions, IProjectOptionsService projectOptionsService)
+        // Bound repository to MainForm's ImageRepository (Workaround for when ImageRepo fifo buffer runs out of space ...)
+        private ImageRepository boundRepo;
+
+        public ProjectPresenter(JsonSerializerOptions jsonOptions, IProjectOptionsService projectOptionsService)
         {
-            this.imageService = imageService;
             this.jsonOptions = jsonOptions;
             this.projectOptionsService = projectOptionsService;
             this.Project = new DeepLearningProject();
         }
 
-        public DeepLearningProject Project { get; private set; }
+        /// <summary>
+        /// After new/load/save project this is the current project path
+        /// </summary>
+        public string ProjectPath
+        {
+            get => this.projectPath;
+            set
+            {
+                if (this.projectPath == value)
+                    return;
 
-        public string ProjectPath { get; set; }
+                this.projectPath = value;
 
-        public string ProjectName { get; set; }
+                // Invalidate derived paths
+                this.paths = null;
+            }
+        }
 
-        public void LoadProject(string jsonPath, ImageRepository imagesRepo)
+        /// <summary>
+        /// File paths depending on current ProjectPath and ProjectOptions
+        /// </summary>
+        public ProjectPaths Paths
+        {
+            get
+            {
+                if (this.paths == null)
+                {
+                    if (string.IsNullOrWhiteSpace(this.ProjectPath))
+                        throw new InvalidOperationException("ProjectPath not set.");
+
+                    this.paths = new ProjectPaths(this.ProjectPath, this.Project.Name, this.projectOptionsService);
+                }
+                return this.paths;
+            }
+        }
+
+        /// <summary>
+        /// Call this once from App after you create your ImageRepository, so the presenter can
+        /// save dirty runtimes when the repo evicts them.
+        /// </summary>
+        public void BindRepository(ImageRepository repo)
+        {
+            if (ReferenceEquals(boundRepo, repo))
+                return;
+
+            if (boundRepo != null)
+                boundRepo.RuntimeEvicting -= OnRuntimeEvicting;
+
+            boundRepo = repo;
+
+            if (boundRepo != null)
+                boundRepo.RuntimeEvicting += OnRuntimeEvicting;
+        }
+
+        public void LoadProject(string jsonPath)
         {
             try
             {
-                this.ProjectPath = Path.GetDirectoryName(jsonPath);
-                this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
+                ProjectPath = Path.GetDirectoryName(jsonPath);
+                Project.Name = Path.GetFileNameWithoutExtension(jsonPath);
 
+                // Create folder structure if missing
+                projectOptionsService.EnsureAll(ProjectPath);
 
-                // Create folder structure if missing and get paths
-                projectOptionsService.EnsureAll(this.ProjectPath);
-                var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
-                var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
-                var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
+                // Resolve all paths
+                var paths = Paths;
 
-                if (!File.Exists(jsonPath))
-                {
-                    ErrorOccured?.Invoke(this, $"Project file not found: {jsonPath}");
-                    return;
-                }
-
-                var json = File.ReadAllText(jsonPath);
+                // Load project json
+                var json = File.ReadAllText(paths.JsonPath);
                 var loadedTemp = JsonSerializer.Deserialize<DeepLearningProject>(json, jsonOptions);
 
-                this.Project.CopyFrom(loadedTemp);
+                Project.CopyFrom(loadedTemp);
 
-                imagesRepo.Dispose();
-
-                // Load any saved annotations/masks by GUID
-                if (this.Project.Images != null)
-                {
-                    foreach (var it in Project.Images)
-                    {
-                        // Prefer a copied file under /images/{guid}.* if present; otherwise use the JSON path.
-                        it.Path = ResolveImagePathFallback(imagesPath, it.Guid, it.Path, this.ProjectPath);
-
-                        var id = it.Guid;
-                        var rt = imagesRepo.GetRuntime(id);
-
-                        var annPng = Path.Combine(annotationsPath, id + ".png");
-                        if (File.Exists(annPng))
-                        {
-                            using (var tmp = Image.FromFile(annPng))
-                            {
-                                rt.Annotation = new Bitmap(tmp); // unlocked copy
-                            }
-                        }
-
-                        var maskPng = Path.Combine(masksPath, id + ".png");
-                        if (File.Exists(maskPng))
-                        {
-                            LabelMask.TryLoadPng8(maskPng, out var lm);
-                            rt.Mask = lm;
-                        }
-                    }
-                }
-
-                // Thumbnail generation for UI responsiveness
-                if (this.Project.Images != null)
-                {
-                    foreach (var img in this.Project.Images)
-                    {
-                        // kick off async thumbnail generation
-                        _ = imageService.EnsureThumbnailAsync(img.Guid, img.Path);
-                    }
-                }
+                if (Project.Images == null)
+                    return;
 
                 ProjectLoaded?.Invoke(this, EventArgs.Empty);
             }
@@ -119,63 +132,71 @@ namespace AnnotationTool.Core.Services
                 var json = File.ReadAllText(jsonPath);
                 var settingsTemp = JsonSerializer.Deserialize<SavedModelPackage>(json, jsonOptions);
 
-                this.Project.Settings.CopyFrom(settingsTemp.Settings);
+                Project.Settings.CopyFrom(settingsTemp.Settings);
             }
             catch (Exception ex)
             {
                 ErrorOccured?.Invoke(this, ex.Message);
             }
+        }
+
+        public void SaveJsonFile()
+        {
+            var paths = Paths;
+
+            // Save json project file
+            var json = JsonSerializer.Serialize(Project, jsonOptions);
+            File.WriteAllText(paths.JsonPath, json);
         }
 
         public void SaveProject(ImageRepository imagesRepo)
         {
-            if (string.IsNullOrWhiteSpace(this.ProjectPath) || string.IsNullOrWhiteSpace(this.ProjectName))
-                throw new ArgumentException("Project path is empty.");
-
             try
             {
-                // Create folder structure if missing and get paths
-                projectOptionsService.EnsureAll(this.ProjectPath);
-                var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
-                var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
-                var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
-                var jsonPath = Path.Combine(this.ProjectPath, this.ProjectName + ".json");
+                // Resolve all paths and create folder structure if missing
+                var paths = Paths;
+                projectOptionsService.EnsureAll(paths.Root);
 
-                // Copy source images into /images/{guid}.{ext}
-                foreach (var item in this.Project.Images)
+                // Copy/save into folder/{guid}.{ext}
+                foreach (var item in Project.Images)
                 {
                     var id = item.Guid;
-                    var srcPath = item.Path;
 
-                    if (string.IsNullOrWhiteSpace(srcPath) || !File.Exists(srcPath))
-                        continue; // skip missing/empty
+                    // All source images are expected to be in this folder, if not -> copy from original path to project folder
+                    var imgProjectPath = Path.Combine(paths.Images, id + paths.ImagesExt);
 
-                    var ext = Path.GetExtension(srcPath);
-                    if (string.IsNullOrEmpty(ext)) ext = ".png"; // fallback
-
-                    var dst = Path.Combine(imagesPath, id + ext);
-                    if (!File.Exists(dst) || !FilesAreSame(srcPath, dst))
-                        File.Copy(srcPath, dst, overwrite: true);
-
-                    item.Path = dst;
-
-                    var rtItem = imagesRepo.GetRuntime(id);
-
-                    if (rtItem.Annotation != null)
+                    if (!File.Exists(imgProjectPath))
                     {
-                        var path = Path.Combine(annotationsPath, id + ".png");
-                        rtItem.Annotation.Save(path, ImageFormat.Png);
+                        if (File.Exists(item.Path))
+                        {
+                            File.Copy(item.Path, imgProjectPath, overwrite: true);
+                        }
+                        else
+                        {
+                            ErrorOccured?.Invoke(this, $"Image file not found for image {id}: {item.Path}");
+                            continue;
+
+                        }
                     }
-                    if (rtItem.Mask != null)
+                    item.Path = imgProjectPath;
+
+                    // Save annotations/masks
+                    var annPath = Path.Combine(paths.Annotations, id + paths.ImagesExt);
+                    var maskPath = Path.Combine(paths.Masks, id + paths.ImagesExt);
+
+                    // If runtime exists, persist from it (prefer dirty-only)
+                    if (imagesRepo != null && imagesRepo.TryGetRuntime(id, out var rt))
                     {
-                        var path = Path.Combine(masksPath, id + ".png");
-                        LabelMask.SavePng8(path, rtItem.Mask);
-                        item.MaskPath = path;
+                        SaveRuntimeIfDirtyOrMissingFiles(rt, annPath, maskPath);
+                        continue;
                     }
+                    // Ensure annotation/mask files exist. If missing, create blank ones.
+                    EnsureBlankAnnotationExists(item, annPath);
+                    EnsureBlankMaskExists(item, maskPath);
                 }
-
-                var json = JsonSerializer.Serialize(this.Project, jsonOptions);
-                File.WriteAllText(jsonPath, json);
+                // Save json project file
+                var json = JsonSerializer.Serialize(Project, jsonOptions);
+                File.WriteAllText(paths.JsonPath, json);
             }
             catch (Exception ex)
             {
@@ -183,78 +204,65 @@ namespace AnnotationTool.Core.Services
             }
         }
 
-        public void AddImage(string imagePath)
+        public ImageItem AddImage(string imageSourcePath, Size imageSize)
         {
             try
             {
-                var item = EnsureItemForPath(this.Project, imagePath);
+                var item = new ImageItem()
+                {
+                    Path = imageSourcePath,
+                    ImageSize = imageSize,
+                    Roi = new Rectangle(0, 0, imageSize.Width, imageSize.Height), // Always init new image with full Roi
+                    Split = DatasetSplit.Train, // Default to train split, user can change it later
+                };
+                Project.Images.Add(item);
 
-                // Kick off thumbnail generation
-                imageService.EnsureThumbnailAsync(item.Guid, item.Path).ConfigureAwait(false);
+                return item;
             }
             catch (Exception ex)
             {
                 ErrorOccured?.Invoke(this, ex.Message);
+                return null;
             }
         }
 
         public void RemoveImage(Guid imageId)
         {
-            if (this.Project == null)
+            if (Project == null)
                 return;
 
-            var toRemove = this.Project.Images.FirstOrDefault(i => i.Guid == imageId);
+            // Remove from project
+            var toRemove = FindById(Project, imageId);
             if (toRemove != null)
             {
-                this.Project.Images.Remove(toRemove);
-                imageService.DropThumbnail(imageId);
+                Project.Images.Remove(toRemove);
             }
 
-            // Project not saved yet, just return
-            if (this.ProjectPath == null)
+            // If project not saved yet, just return
+            if (string.IsNullOrWhiteSpace(ProjectPath))
                 return;
 
-            var imagesPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Images);
-            var annotationsPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Annotations);
-            var masksPath = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.Masks);
+            var paths = Paths;
 
-            // Get all files that contain the substring in their filename, in theory should be only one
-            var imagesToDelete = Directory.GetFiles(imagesPath, $"*{imageId}*");
-            var masksToDelete = Directory.GetFiles(masksPath, $"*{imageId}*");
-            var annotationsToDelete = Directory.GetFiles(annotationsPath, $"*{imageId}*");
-
-            // Delete each file
-            foreach (var f in imagesToDelete)
-            {
-                SafeDeleteFile(f);
-            }
-            foreach (var f in masksToDelete)
-            {
-                SafeDeleteFile(f);
-            }
-            foreach (var f in annotationsToDelete)
-            {
-                SafeDeleteFile(f);
-            }
+            // Remove associated files
+            SafeDeleteFile(Path.Combine(paths.Images, imageId + paths.ImagesExt));
+            SafeDeleteFile(Path.Combine(paths.Annotations, imageId + paths.ImagesExt));
+            SafeDeleteFile(Path.Combine(paths.Masks, imageId + paths.ImagesExt));
         }
 
         public void NewProject(string jsonPath)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(jsonPath))
-                    throw new ArgumentException("targetProjectJsonPath is empty.", nameof(jsonPath));
+                // Set up paths and create folder structure
+                ProjectPath = Path.GetDirectoryName(jsonPath);
+                Project.Name = Path.GetFileNameWithoutExtension(jsonPath);
+                projectOptionsService.EnsureAll(ProjectPath);
 
-                this.ProjectPath = Path.GetDirectoryName(jsonPath);
-                this.ProjectName = Path.GetFileNameWithoutExtension(jsonPath);
-
-                // Create folder structure if missing and get paths
-                projectOptionsService.EnsureAll(this.ProjectPath);
-
-                this.Project.CopyFrom(new DeepLearningProject());
+                Project.CopyFrom(new DeepLearningProject());
 
                 // Serialize json project file
-                var json = JsonSerializer.Serialize(this.Project, jsonOptions);
+                var json = JsonSerializer.Serialize(Project, jsonOptions);
                 File.WriteAllText(jsonPath, json);
             }
             catch (Exception ex)
@@ -264,35 +272,31 @@ namespace AnnotationTool.Core.Services
             }
         }
 
+        /// <summary>
+        /// Get SLICED image/mask pairs for training based on the current project and specified dataset split.
+        /// </summary>
+        /// <param name="split"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         public IReadOnlyList<(string imagePath, string maskPath)> GetSlicedTrainingPairs(DatasetSplit split)
         {
-            if (this.Project == null)
+            if (Project == null)
                 throw new InvalidOperationException("Project not loaded.");
 
             var result = new List<(string imagePath, string maskPath)>();
-
-            var slicedImagesFolder = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.SlicedImages);
-            var slicedMasksFolder = projectOptionsService.GetFolderPath(this.ProjectPath, ProjectFolderType.SlicedMasks);
+            var paths = Paths;
 
             // Gather all GUIDs that are marked for training
-            var trainGuids = this.Project.Images
-                .Where(img => img.Split == split)
-                .Select(img => img.Guid);
+            var trainGuids = Project.Images.Where(img => img.Split == split).Select(img => img.Guid);
 
-            var allSliceImages = Directory.EnumerateFiles(slicedImagesFolder, "*.png");
-            var allSliceMasks = Directory.EnumerateFiles(slicedMasksFolder, "*.png");
-
+            var allSliceImages = Directory.EnumerateFiles(paths.SlicedImages, "*" + paths.ImagesExt);
+            var allSliceMasks = Directory.EnumerateFiles(paths.SlicedMasks, "*" + paths.ImagesExt);
 
             foreach (var id in trainGuids)
             {
                 // Get all slice images/masks for this GUID
-
-                var sliceImages = allSliceImages
-                    .Where(i => i.Contains(id.ToString())).ToList();
-
-                var sliceMasks = allSliceMasks
-                    .Where(i => i.Contains(id.ToString())).ToList();
-
+                var sliceImages = allSliceImages.Where(i => i.Contains(id.ToString())).ToList();
+                var sliceMasks = allSliceMasks.Where(i => i.Contains(id.ToString())).ToList();
 
                 // There needs to be always the same number of images and masks
                 if (sliceImages.Count == sliceMasks.Count && sliceImages.Count > 0)
@@ -306,5 +310,135 @@ namespace AnnotationTool.Core.Services
             return result;
         }
 
+        public string ResolveImagePath(Guid imageGuid)
+        {
+            var img = Project.Images.FirstOrDefault(i => i.Guid == imageGuid);
+            if (img == null)
+                return null;
+
+            var imgPath = string.Empty;
+
+
+            // Project not saved yet -> no Projectpath -> use original image path
+            if (ProjectPath == null)
+            {
+                imgPath = img.Path;
+            }
+            else
+            {
+                var paths = Paths;
+                var itemPath = Path.Combine(Paths.Images, imageGuid + paths.ImagesExt);
+
+                // Use relative path if image exists in project folder
+                if (File.Exists(itemPath))
+                {
+                    imgPath = itemPath;
+                }
+                else
+                {
+                    // Project saved -> added new images -> new images not saved yet in project -> use original path
+                    imgPath = img.Path;
+                }
+            }
+            return imgPath;
+        }
+
+        public bool TryGetImageItem(Guid id, out ImageItem imageItem)
+        {
+            if (Project?.Images == null)
+            {
+                imageItem = null;
+                return false;
+            }
+
+            imageItem = Project.Images.FirstOrDefault(i => i.Guid == id);
+            return imageItem != null;
+        }
+
+        private void OnRuntimeEvicting(Guid id, ImageRuntime rt)
+        {
+            // If we don't have a saved project yet, we have nowhere to persist.
+            // ToDo: We could consider forcing a save at this point, but for now just skip persistence on eviction if project not saved yet.
+            if (string.IsNullOrWhiteSpace(ProjectPath))
+                return;
+
+            if (rt == null)
+                return;
+
+            if (!rt.IsAnnotationDirty && !rt.IsMaskDirty)
+                return;
+
+            if (!TryGetImageItem(id, out var item) || item == null)
+                return;
+
+            var paths = Paths;
+
+            var annPath = Path.Combine(paths.Annotations, id + paths.ImagesExt);
+            var maskPath = Path.Combine(paths.Masks, id + paths.ImagesExt);
+
+            try
+            {
+                SaveRuntimeIfDirtyOrMissingFiles(rt, annPath, maskPath);
+            }
+            catch (Exception ex)
+            {
+                // Don't throw: eviction must proceed. But we should notify.
+                ErrorOccured?.Invoke(this, $"Failed to persist evicted runtime {id}: {ex.Message}");
+            }
+        }
+
+        private void SaveRuntimeIfDirtyOrMissingFiles(ImageRuntime rt, string annPath, string maskPath)
+        {
+            // Annotation
+            if (rt.IsAnnotationDirty || !File.Exists(annPath))
+            {
+                rt.ReadAnnotation(bmp =>
+                {
+                    // Ensure folder exists (should, but robust)
+                    Directory.CreateDirectory(Path.GetDirectoryName(annPath));
+                    bmp.Save(annPath, ImageFormat.Png);
+                });
+
+                rt.MarkAnnotationClean();
+            }
+
+            // Mask
+            if (rt.IsMaskDirty || !File.Exists(maskPath))
+            {
+                rt.ReadMask(m =>
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(maskPath));
+                    LabelMask.SavePng8(maskPath, m);
+                });
+
+                rt.MarkMaskClean();
+            }
+        }
+
+        private void EnsureBlankAnnotationExists(ImageItem item, string annPath)
+        {
+            if (File.Exists(annPath))
+                return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(annPath));
+
+            using (var bmp = new Bitmap(item.ImageSize.Width, item.ImageSize.Height, PixelFormat.Format32bppArgb))
+            {
+                // Transparent by default; no need to clear
+                bmp.Save(annPath, ImageFormat.Png);
+            }
+        }
+
+        private void EnsureBlankMaskExists(ImageItem item, string maskPath)
+        {
+            if (File.Exists(maskPath))
+                return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(maskPath));
+
+            // Create an empty mask (all zeros)
+            var blank = new LabelMask(item.ImageSize.Width, item.ImageSize.Height);
+            LabelMask.SavePng8(maskPath, blank);
+        }
     }
 }
