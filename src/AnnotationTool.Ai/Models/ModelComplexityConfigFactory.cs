@@ -31,20 +31,6 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-
-                //cfg.Depth = 2;
-                //cfg.FirstFilter = 32;
-
-                //cfg.UsePooling = true;
-                //cfg.UseStridedConv = false;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = true;
-
-                //cfg.UseInstanceNorm = false;
-                //cfg.UseDropout = false;
-                //cfg.UseChannelAttention = false;
-                //cfg.UseAttentionGates = false;
-                //cfg.UseSelfAttention = false; // Not working at the moment
             }
             else if (complexity == ModelComplexity.Medium)
             {
@@ -62,21 +48,6 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-
-
-                //cfg.Depth = 3;
-                //cfg.FirstFilter = 64;
-
-                //cfg.UsePooling = false;
-                //cfg.UseStridedConv = true;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = true;
-
-                //cfg.UseInstanceNorm = true;
-                //cfg.UseDropout = false;
-                //cfg.UseChannelAttention = false;
-                //cfg.UseAttentionGates = false;
-                //cfg.UseSelfAttention = false; // Not working at the moment
             }
             else if (complexity == ModelComplexity.High)
             {
@@ -88,29 +59,12 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseInterpolationDown = false;
                 cfg.UseInterpolationUp = false;
 
-                cfg.UseInstanceNorm = false;
+                cfg.UseInstanceNorm = true;
                 cfg.UseDropout = false;
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-                //cfg.Depth = 4;
-                //cfg.FirstFilter = 96;
-
-                //cfg.UsePooling = false;
-                //cfg.UseStridedConv = true;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = false;
-
-                //cfg.UseInstanceNorm = true;
-                //cfg.UseDropout = true;
-                //cfg.UseChannelAttention = true;
-                //cfg.UseAttentionGates = true;
-                //cfg.UseSelfAttention = true; // Not working at the moment
             }
-
-            // Apply automatic resolution scaling
-            //ApplyAutoScaling(cfg, imageWidth, imageHeight);
-
             return cfg;
         }
 

@@ -204,6 +204,12 @@ namespace AnnotationTool.Core.Services
             }
         }
 
+        /// <summary>
+        /// Add new ImageItem DTO to project (with path only) and get back the created item with assigned GUID
+        /// </summary>
+        /// <param name="imageSourcePath"></param>
+        /// <param name="imageSize"></param>
+        /// <returns></returns>
         public ImageItem AddImage(string imageSourcePath, Size imageSize)
         {
             try

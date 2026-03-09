@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.Devices;
 using System.Drawing.Drawing2D;
 using static AnnotationTool.Ai.Utils.DatasetStatistics;
-using static AnnotationTool.Core.Utils.BitmapIO;
 using static AnnotationTool.Core.Utils.CoreUtils;
 using static TorchSharp.torch.cuda;
 
@@ -23,6 +22,7 @@ namespace AnnotationTool.App
         // Whole project state
         private readonly IProjectPresenter projectPresenter;
 
+        private readonly IImageRuntimeLoader imageRuntimeLoader;
         private readonly ILoggerFactory loggerFactory;
         private readonly Func<TrainingForm> trainingFormFactory;
         private readonly Func<InferenceForm> inferenceFormFactory;
@@ -55,6 +55,7 @@ namespace AnnotationTool.App
 
         public MainForm(
             IProjectPresenter projectPresenter,
+            IImageRuntimeLoader imageRuntimeLoader,
             ILoggerFactory loggerFactory,
             Func<TrainingForm> trainingFormFactory,
             Func<InferenceForm> inferenceFormFactory,
@@ -63,6 +64,7 @@ namespace AnnotationTool.App
             InitializeComponent();
 
             this.projectPresenter = projectPresenter!;
+            this.imageRuntimeLoader = imageRuntimeLoader!;
             this.trainingFormFactory = trainingFormFactory!;
             this.inferenceFormFactory = inferenceFormFactory!;
             this.loggerFactory = loggerFactory!;
@@ -162,17 +164,9 @@ namespace AnnotationTool.App
             {
                 foreach (var it in projectPresenter.Project.Images)
                 {
-                    await Task.Run(() =>
-                    {
-                        var imgPath = projectPresenter.ResolveImagePath(it.Guid);
-                        using var originalImage = LoadBitmapUnlocked(imgPath);
-
-                        var thumb = CreateThumbnail(originalImage, imagesControl.Width);
-                        Invoke(new Action(() =>
-                        {
-                            imagesControl.AddImage(it.Guid, thumb);
-                        }));
-                    });
+                    var imgPath = projectPresenter.ResolveImagePath(it.Guid);
+                    var thumb = await imageRuntimeLoader.CreateThumbnailAsync(imgPath, imagesControl.Width);
+                    imagesControl.AddImage(it.Guid, thumb);
                     imagesControl.UpdateCategory(it.Guid, it.Split);
                 }
             }
@@ -295,50 +289,18 @@ namespace AnnotationTool.App
 
             currentSelectedImageGuid = imageGuid;
 
-
             // If user selects image first time it is added to fifo cache, otherwise get from cache
-            var rt = imagesRepo.GetRuntime(item);
-
-            if (!rt.HasFullImage)
-            {
-                await Task.Run(() =>
-                {
-                    var imgPath = projectPresenter.ResolveImagePath(imageGuid);
-                    var bmp = LoadBitmapUnlocked(imgPath);
-                    rt.SetFullImage(bmp);
-                });
-            }
+            var rt = await imageRuntimeLoader.EnsureFullImageLoadedAsync(item, imagesRepo, projectPresenter);
 
             // If project was saved we have to load annotation, masks or heatmaps one time from disk into runtime cache
             if (!string.IsNullOrEmpty(projectPresenter.ProjectPath))
             {
-                var paths = projectPresenter.Paths;
-
                 switch (currentPipelineLoopState)
                 {
                     case PipelineLoopState.Annotation:
                         if (!rt.AnnotationLoadedOnce)
                         {
-                            var annPng = Path.Combine(paths.Annotations, imageGuid + paths.ImagesExt);
-                            var maskPng = Path.Combine(paths.Masks, imageGuid + paths.ImagesExt);
-                            if (File.Exists(annPng))
-                            {
-                                using var fs = File.OpenRead(annPng);
-                                using var tmp = Image.FromStream(fs);
-
-                                rt.MutateAnnotation(bmp =>
-                                {
-                                    using var g = Graphics.FromImage(bmp);
-                                    g.DrawImageUnscaled(tmp, 0, 0);
-                                });
-                                rt.MarkAnnotationClean();
-                            }
-                            if (File.Exists(maskPng) && LabelMask.TryLoadPng8(maskPng, out var lm))
-                            {
-                                rt.MutateMask(m => m.CopyFrom(lm));
-                                rt.MarkMaskClean();
-                            }
-                            rt.AnnotationLoadedOnce = true;
+                            await imageRuntimeLoader.EnsureAnnotationAndMaskLoadedAsync(item, imagesRepo, projectPresenter);
                         }
                         break;
 
@@ -346,37 +308,7 @@ namespace AnnotationTool.App
 
                         if (currentSelectedFeature != null)
                         {
-                            // Determine feature folder
-                            var suffixes = item.SegmentationStats.Keys.Select(k => k.ToString()).ToList();
-                            var featureSubfolder = FindMatchingFolder(paths.MasksHeatmaps, currentSelectedFeature.Name, suffixes);
-
-                            if (!string.IsNullOrEmpty(featureSubfolder))
-                            {
-                                var rawHeatPng = Path.Combine(featureSubfolder, imageGuid + paths.ImagesExt);
-
-                                if (File.Exists(rawHeatPng))
-                                {
-                                    // Cache raw certainty map per feature
-                                    if (!rt.HasHeatmapCertainty(currentSelectedFeature.Name))
-                                    {
-                                        var certainty = await Task.Run(() =>
-                                            LoadGrayscalePngToByteArray(rawHeatPng, item.ImageSize.Width, item.ImageSize.Height));
-
-                                        rt.SetHeatmapCertainty(currentSelectedFeature.Name, certainty, item.ImageSize.Width, item.ImageSize.Height);
-                                    }
-
-                                    // Apply threshold from slider (0..100 -> 0..255)
-                                    int thrByte = (int)Math.Round(tBThreshold.Value * 255.0 / 100.0);
-                                    rt.SetHeatmapThreshold(thrByte);
-
-                                    // Generate Turbo bitmap for renderer
-                                    rt.RegenerateHeatmapTurbo(currentSelectedFeature.Name);
-                                }
-                                else
-                                {
-                                    rt.ClearHeatmap();
-                                }
-                            }
+                            await imageRuntimeLoader.EnsureHeatmapLoadedAsync(item, imagesRepo, projectPresenter, currentSelectedFeature.Name, tBThreshold.Value);
 
                             // Update inference results control for current image if they exist
                             var segRes = item.SegmentationStats.Values.ToList();
@@ -524,34 +456,28 @@ namespace AnnotationTool.App
                 int added = 0, failed = 0;
                 var beforeCount = projectPresenter.Project.Images.Count;
 
-                await Task.Run(() =>
+                foreach (var file in ofd.FileNames)
                 {
-                    foreach (var file in ofd.FileNames)
+
+                    if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
                     {
-
-                        if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
-                        {
-                            failed++;
-                            continue;
-                        }
-                        using var originalImage = LoadBitmapUnlocked(file);
-
-                        // Add new ImageItem DTO to project (with path only) and get back the created item with assigned GUID
-                        var newItem = projectPresenter.AddImage(file, new Size(originalImage.Width, originalImage.Height));
-
-                        if (projectPresenter.Project.Images.Count > beforeCount)
-                            added++;
-                        if (newItem == null)
-                            continue;
-
-                        var thumb = CreateThumbnail(originalImage, imagesControl.Width);
-                        BeginInvoke(new Action(() =>
-                        {
-                            imagesControl.AddImage(newItem.Guid, thumb);
-                            imagesControl.UpdateCategory(newItem.Guid, newItem.Split);
-                        }));
+                        failed++;
+                        continue;
                     }
-                });
+
+                    var imageSize = await imageRuntimeLoader.ReadImageSizeAsync(file);
+                    var newItem = projectPresenter.AddImage(file, imageSize);
+
+                    if (projectPresenter.Project.Images.Count > beforeCount)
+                        added++;
+                    if (newItem == null)
+                        continue;
+
+                    var thumb = await imageRuntimeLoader.CreateThumbnailAsync(file, imagesControl.Width);
+
+                    imagesControl.AddImage(newItem.Guid, thumb);
+                    imagesControl.UpdateCategory(newItem.Guid, newItem.Split);
+                }
 
                 // Force reset so user can run same model again
                 currentSelectedModelFileName = "";

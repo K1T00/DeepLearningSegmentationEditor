@@ -15,10 +15,7 @@ using static AnnotationTool.Ai.IO.ModelMetaData;
 using static AnnotationTool.Ai.Utils.AiUtils;
 using static AnnotationTool.Ai.Utils.BatchSizeEstimator;
 using static AnnotationTool.Ai.Utils.DatasetStatistics;
-using static AnnotationTool.Ai.Utils.LearningRateOptimizer;
 using static TorchSharp.torch;
-using static TorchSharp.torch.optim;
-using static TorchSharp.torch.optim.lr_scheduler;
 using static TorchSharp.torch.utils.data;
 
 
@@ -54,17 +51,12 @@ namespace AnnotationTool.Ai.Training
             this.complexityProvider = complexityProvider;
         }
 
-        public async Task RunTraining(
-            IProjectPresenter project,
-            IProgress<LossReport> lossProgress,
-            CancellationToken ct,
-            long cpuMemoryBudgetBytes,
-            long gpuMemoryBudgetBytes)
+        public async Task RunTraining(IProjectPresenter project, IProgress<LossReport> lossProgress, CancellationToken ct, long cpuMemoryBudgetBytes, long gpuMemoryBudgetBytes)
         {
             try
             {
                 device = ResolveDevice(project.Project.Settings);
-                logger.LogInformation("Starting training on: " + device);
+                logger.LogInformation("Starting training on: {Device}", device);
 
                 var imgsPath = project.Paths.Images;
                 var imgsExt = project.Paths.ImagesExt;
@@ -82,21 +74,24 @@ namespace AnnotationTool.Ai.Training
                     project.Project.Settings.PreprocessingSettings.SliceSize);
 
                 // Build dataset + dataloaders (+ augmentations)
-                var (trainLoader, valLoader) = BuildDataLoaders(project, device, cfg, cpuMemoryBudgetBytes, gpuMemoryBudgetBytes);
+                var loaderInfo = BuildDataLoaders(project, device, cfg, cpuMemoryBudgetBytes, gpuMemoryBudgetBytes);
 
                 var model = modelFactory.Create(project.Project, device, cfg);
-                var optimizer = BuildOptimizer(model, project.Project.Settings);
+
+                var optimization = TrainingOptimizationFactory.Build(model, project.Project.Settings, cfg, loaderInfo.BatchSize);
 
                 var ctx = new TrainingContext
                 {
                     Device = device,
                     Model = model,
-                    Optimizer = optimizer,
-                    TrainLoader = trainLoader,
-                    ValLoader = valLoader,
+                    Optimization = optimization,
+                    TrainLoader = loaderInfo.TrainLoader,
+                    ValLoader = loaderInfo.ValLoader,
                     Settings = project.Project.Settings,
                     StoppingMonitor = new TrainingStopMonitor(project.Project.Settings.TrainingStoppingSettings),
-                    SegmentationMode = project.Project.Features.Count == 1 ? SegmentationMode.Binary : SegmentationMode.Multiclass
+                    SegmentationMode = project.Project.Features.Count == 1
+                      ? SegmentationMode.Binary
+                      : SegmentationMode.Multiclass
                 };
 
                 // Training loop
@@ -116,7 +111,7 @@ namespace AnnotationTool.Ai.Training
             }
         }
 
-        private (DataLoader trainLoader, DataLoader valLoader) BuildDataLoaders(
+        private DataLoaderBuildResult BuildDataLoaders(
             IProjectPresenter project,
             Device device,
             SegmentationModelConfig cfg,
@@ -124,39 +119,46 @@ namespace AnnotationTool.Ai.Training
             long gpuMemoryBudgetBytes)
         {
             var nWorkers = 4;
+            // Note: Batch size variation (450+50 -> 250+250) does not skew results significantly, so we use a fixed optimizer type for estimation
+            // But BatchNorm2d should be used with a minimum batch size
+            const int MinBatchForBatchNorm = 8;
+
+            var settings = project.Project.Settings;
+            var preprocessing = settings.PreprocessingSettings;
 
             var availableMemory =
                 project.Project.Settings.TrainModelSettings.Device == ComputeDevice.Gpu
                 ? gpuMemoryBudgetBytes
                 : cpuMemoryBudgetBytes;
 
-            // Note: Batch size variation (450+50 -> 250+250) does not skew results significantly, so we use a fixed optimizer type for estimation
-            // But BatchNorm2d should be used with a minimum batch size
-            const int MinBatchForBatchNorm = 8;
+            var sliceSize = preprocessing.SliceSize;
+            var numChannels = preprocessing.TrainAsGreyscale ? 1 : 3;
 
             var batchSize = EstimateBatchSize(
                 cfg,
-                project.Project.Settings.PreprocessingSettings.SliceSize,
-                project.Project.Settings.PreprocessingSettings.SliceSize,
-                project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3,
+                sliceSize,
+                sliceSize,
+                numChannels,
                 availableMemory,
-                project.Project.Settings.TrainModelSettings.Device,
-                OptimizerType.SGD);
+                settings.TrainModelSettings.Device,
+                OptimizerType.AdamW);
 
-            var augmentations = ImageAugmentations.BuildAugmentations(project.Project.Settings.AugmentationSettings);
             var trainPairs = project.GetSlicedTrainingPairs(DatasetSplit.Train);
             var valPairs = project.GetSlicedTrainingPairs(DatasetSplit.Validate);
 
+            // BatchNorm should not run with very small batches.
             if (!cfg.UseInstanceNorm)
             {
                 batchSize = AdjustBatchSizeIfNecessary(batchSize, trainPairs.Count, MinBatchForBatchNorm);
             }
 
+            var augmentations = ImageAugmentations.BuildAugmentations(settings.AugmentationSettings);
+
             // Build datasets according to augmentation mode
             Dataset finalTrainDataset = null;
 
             // Validation dataset is not augmented in any mode, but we still need to apply preprocessing (e.g. normalization)
-            var validationDataSet = new SegmentationDataset(valPairs, project, device, augmentations, cfg);
+            var validationDataset = new SegmentationDataset(valPairs, project, device, null, cfg);
 
             switch (project.Project.Settings.AugmentationSettings.AugmentationMode)
             {
@@ -179,25 +181,24 @@ namespace AnnotationTool.Ai.Training
                         new FilteredSegmentationDatasetDataset(trainPairs, project, device, augmentations, cfg));
 
                     break;
-            }
 
-            return (DataLoader(finalTrainDataset, batchSize, true, device, num_worker: nWorkers),
-                DataLoader(validationDataSet, batchSize, false, device, num_worker: nWorkers));
+                default:
+                    finalTrainDataset = new SegmentationDataset(trainPairs, project, device, augmentations, cfg);
+                    break;
+            }
+            return new DataLoaderBuildResult
+            {
+                BatchSize = batchSize,
+                TrainLoader = DataLoader(finalTrainDataset, batchSize, true, device, num_worker: nWorkers),
+                ValLoader = DataLoader(validationDataset, batchSize, false, device, num_worker: nWorkers)
+            };
         }
 
-        private static (Optimizer optimizer, LRScheduler scheduler) BuildOptimizer(ISegmentationModel model, DeepLearningSettings settings)
+        private sealed class DataLoaderBuildResult
         {
-            // ToDo
-            var maxEpochs = 300;
-
-            var module = model.AsModule();
-            var optimizer = BuildSegmentationOptimizer(module.parameters());
-            var lrScheduler =
-                BuildSegmentationScheduler(
-                    optimizer,
-                    settings.TrainingStoppingSettings.MaxIterationCount == 0 ? maxEpochs : settings.TrainingStoppingSettings.MaxIterationCount);
-
-            return (optimizer, lrScheduler);
+            public int BatchSize { get; set; }
+            public DataLoader TrainLoader { get; set; }
+            public DataLoader ValLoader { get; set; }
         }
 
     }

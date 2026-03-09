@@ -9,11 +9,12 @@ using static AnnotationTool.Ai.Utils.LossFunctions;
 using static TorchSharp.torch;
 using static TorchSharp.torch.optim;
 using static TorchSharp.torch.optim.lr_scheduler.impl;
+using static TorchSharp.torch.nn.utils;
 
 namespace AnnotationTool.Ai.Training
 {
     /// <summary>
-    /// Generic segmentation trainer operating on ISegmentationModel.
+    /// Generic segmentation trainer.
     /// </summary>
     public class SegmentationTrainer
     {
@@ -32,7 +33,12 @@ namespace AnnotationTool.Ai.Training
             try
             {
                 var stoppingSettings = ctx.Settings.TrainingStoppingSettings;
-                var maxEpochs = stoppingSettings.MaxIterationCount;
+
+                var maxEpochs = stoppingSettings != null && stoppingSettings.MaxIterationCount > 0
+                    ? stoppingSettings.MaxIterationCount
+                    : int.MaxValue;
+
+                double? smoothedValLoss = null;
                 var epoch = 1;
 
                 while (epoch <= maxEpochs && !ct.IsCancellationRequested)
@@ -42,33 +48,31 @@ namespace AnnotationTool.Ai.Training
                     var trainLoss = TrainEpoch();
                     var valLoss = ValidateEpoch();
 
-                    if (ctx.Optimizer.scheduler is ReduceLROnPlateau rlr)
+                    if (ctx.Optimization.Scheduler != null)
                     {
-                        // ToDo: Experiment with different metrics for learning rate reduction. Currently using validation loss, which is common practice.
-                        // Typically we want to reduce learning rate based on validation performance.
-                        // But what about small datasets where validation loss can be very noisy? Should we use training loss instead in that case?
+                        if (ctx.Optimization.SchedulerRequiresMetric)
+                        {
+                            smoothedValLoss = smoothedValLoss.HasValue
+                                ? 0.7 * smoothedValLoss.Value + 0.3 * valLoss
+                                : valLoss;
 
-                        //rlr.step(trainLoss);
-                        double smoothedValLoss = 1;
-
-                        if (epoch == 1)
-                            smoothedValLoss = valLoss;
+                            var plateauScheduler = ctx.Optimization.Scheduler as ReduceLROnPlateau;
+                            if (plateauScheduler != null)
+                                plateauScheduler.step(smoothedValLoss.Value);
+                            else
+                                ctx.Optimization.Scheduler.step();
+                        }
                         else
-                            smoothedValLoss = 0.7 * smoothedValLoss + 0.3 * valLoss;
-                        //smoothedValLoss = 0.8 * smoothedValLoss + 0.2 * valLoss;
-
-                        rlr.step(smoothedValLoss);
-                    }
-                    else
-                    {
-                        ctx.Optimizer.scheduler.step();
+                        {
+                            ctx.Optimization.Scheduler.step();
+                        }
                     }
 
-                    ReportProgress(logger, lossProgress, epoch, trainLoss, valLoss, GetLearningRate(ctx.Optimizer.optimizer));
+                    ReportProgress(logger, lossProgress, epoch, trainLoss, valLoss, GetLearningRate(ctx.Optimization.Optimizer));
 
                     if (ctx.StoppingMonitor.ShouldStop(epoch, valLoss, out var reason))
                     {
-                        logger.LogInformation(string.Format("Training stopped: {0}", reason));
+                        logger.LogInformation("Training stopped: {Reason}", reason);
                         break;
                     }
                     epoch++;
@@ -106,13 +110,20 @@ namespace AnnotationTool.Ai.Training
                     batchCount++;
 
                     // Clear the gradients before doing the back-propagation
-                    ctx.Optimizer.optimizer.zero_grad();
+                    ctx.Optimization.Optimizer.zero_grad();
 
                     // Do back-propagation, which computes all the gradients
                     computedLoss.backward();
 
                     // Adjust the weights using the (newly calculated) gradients
-                    ctx.Optimizer.optimizer.step();
+                    if (ctx.Optimization.GradientClipNorm.HasValue)
+                    {
+                        clip_grad_norm_(
+                            ctx.Model.AsModule().parameters(),
+                            ctx.Optimization.GradientClipNorm.Value);
+                    }
+
+                    ctx.Optimization.Optimizer.step();
 
                     d.DisposeEverything();
                 }
@@ -168,13 +179,13 @@ namespace AnnotationTool.Ai.Training
                 "Epoch: " + epoch + Environment.NewLine +
                 "TrainLoss: " + (float)Math.Round(trainLoss, 4) + Environment.NewLine +
                 "ValLoss: " + (float)Math.Round(valLoss, 4) + Environment.NewLine +
-                "LearningRate: " + (float)Math.Round(learningRate, 8) + Environment.NewLine
-                );
+                "LearningRate: " + (float)Math.Round(learningRate, 8) + Environment.NewLine);
         }
 
         private static double GetLearningRate(Optimizer optimizer)
         {
-            return optimizer.ParamGroups.FirstOrDefault().LearningRate;
+            var paramGroup = optimizer.ParamGroups.FirstOrDefault();
+            return paramGroup != null ? paramGroup.LearningRate : 0.0;
         }
 
     }
