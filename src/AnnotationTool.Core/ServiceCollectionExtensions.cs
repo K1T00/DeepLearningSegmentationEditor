@@ -15,7 +15,7 @@ namespace AnnotationTool.Core
 
             // Core services
             services.AddSingleton<IProjectOptionsService, ProjectOptionsService>();
-
+            services.AddSingleton<IImageRuntimeLoader, ImageRuntimeLoader>();
 
             services.AddSingleton<IProjectPresenter, ProjectPresenter>(sp =>
             {

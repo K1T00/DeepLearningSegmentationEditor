@@ -3,10 +3,6 @@ using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models
 {
-    ///
-    ///                                           -----  WIP -----
-    ///
-    ///
     ///						+--------------------------------------------------------------+
     ///						|            Segmentation (UNet) Model Complexity              |
     ///						+--------------------------------------------------------------+
@@ -40,7 +36,8 @@ namespace AnnotationTool.Ai.Models
     ///             Output                          Output                                    Output
     ///                                                                                
     ///                
-    ///
+    /// !!!!!!!!!!    Check ModelComplexityConfigFactory for current deployed config values.    !!!!!!!!!! 
+    /// 
     public class ModelComplexityConfigProvider : IModelComplexityConfigProvider
     {
         public SegmentationModelConfig GetConfig(ModelComplexity complexity, int imageWidth, int imageHeight)
@@ -65,20 +62,6 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-
-                //cfg.Depth = 2;
-                //cfg.FirstFilter = 32;
-
-                //cfg.UsePooling = true;
-                //cfg.UseStridedConv = false;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = true;
-
-                //cfg.UseInstanceNorm = false;
-                //cfg.UseDropout = false;
-                //cfg.UseChannelAttention = false;
-                //cfg.UseAttentionGates = false;
-                //cfg.UseSelfAttention = false; // Not working at the moment
             }
             else if (complexity == ModelComplexity.Medium)
             {
@@ -96,21 +79,6 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-
-
-                //cfg.Depth = 3;
-                //cfg.FirstFilter = 64;
-
-                //cfg.UsePooling = false;
-                //cfg.UseStridedConv = true;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = true;
-
-                //cfg.UseInstanceNorm = true;
-                //cfg.UseDropout = false;
-                //cfg.UseChannelAttention = false;
-                //cfg.UseAttentionGates = false;
-                //cfg.UseSelfAttention = false; // Not working at the moment
             }
             else if (complexity == ModelComplexity.High)
             {
@@ -122,62 +90,13 @@ namespace AnnotationTool.Ai.Models
                 cfg.UseInterpolationDown = false;
                 cfg.UseInterpolationUp = false;
 
-                cfg.UseInstanceNorm = false;
+                cfg.UseInstanceNorm = true;
                 cfg.UseDropout = false;
                 cfg.UseChannelAttention = false;
                 cfg.UseAttentionGates = false;
                 cfg.UseSelfAttention = false; // Not working at the moment
-                //cfg.Depth = 4;
-                //cfg.FirstFilter = 96;
-
-                //cfg.UsePooling = false;
-                //cfg.UseStridedConv = true;
-                //cfg.UseInterpolationDown = false;
-                //cfg.UseInterpolationUp = false;
-
-                //cfg.UseInstanceNorm = true;
-                //cfg.UseDropout = true;
-                //cfg.UseChannelAttention = true;
-                //cfg.UseAttentionGates = true;
-                //cfg.UseSelfAttention = true; // Not working at the moment
             }
-
-            // Apply automatic resolution scaling
-            //ApplyAutoScaling(cfg, imageWidth, imageHeight);
-
             return cfg;
-        }
-
-        private void ApplyAutoScaling(SegmentationModelConfig cfg, int width, int height)
-        {
-            int maxDim = width > height ? width : height;
-
-            if (maxDim <= 256)
-            {
-                if (cfg.Depth > 2) cfg.Depth = 2;
-                if (cfg.FirstFilter > 32) cfg.FirstFilter = 32;
-            }
-            else if (maxDim <= 512)
-            {
-                if (cfg.Depth > 3) cfg.Depth = 3;
-                if (cfg.FirstFilter > 48) cfg.FirstFilter = 48;
-            }
-            else if (maxDim <= 1024)
-            {
-                if (cfg.Depth < 4) cfg.Depth = 4;
-                if (cfg.FirstFilter < 64) cfg.FirstFilter = 64;
-            }
-            else // >1024px
-            {
-                if (cfg.Depth < 5) cfg.Depth = 5;
-                if (cfg.FirstFilter < 96) cfg.FirstFilter = 96;
-
-                cfg.UseChannelAttention = true;
-                cfg.UseAttentionGates = true;
-                cfg.UseSelfAttention = true;
-
-                cfg.UseInterpolationDown = true;
-            }
         }
     }
 }

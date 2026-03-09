@@ -73,7 +73,7 @@ namespace AnnotationTool.Ai.Utils
 
         public PairedHorizontalFlip(double probability)
         {
-            p = probability;
+            this.p = probability;
         }
 
         public (Tensor image, Tensor mask) Apply(Tensor image, Tensor mask)
@@ -94,7 +94,7 @@ namespace AnnotationTool.Ai.Utils
 
         public PairedVerticalFlip(double probability)
         {
-            p = probability;
+            this.p = probability;
         }
 
         public (Tensor image, Tensor mask) Apply(Tensor image, Tensor mask)
@@ -115,12 +115,12 @@ namespace AnnotationTool.Ai.Utils
 
         public PairedRandomAffine(AugmentationSettings s)
         {
-            maxDeg = s.Rotation;
-            maxTrans = s.RelativeTranslation;
-            minScale = s.MinScale > 0 ? s.MinScale : 100;
-            maxScale = s.MaxScale > 0 ? s.MaxScale : 100;
-            shearX = s.HorizontalShear;
-            shearY = s.VerticalShear;
+            this.maxDeg = s.Rotation;
+            this.maxTrans = s.RelativeTranslation;
+            this.minScale = s.MinScale > 0 ? s.MinScale : 100;
+            this.maxScale = s.MaxScale > 0 ? s.MaxScale : 100;
+            this.shearX = s.HorizontalShear;
+            this.shearY = s.VerticalShear;
         }
 
         public (Tensor image, Tensor mask) Apply(Tensor image, Tensor mask)
@@ -139,7 +139,7 @@ namespace AnnotationTool.Ai.Utils
 
             // --- apply to both image and mask ---
             image = SafeAffine(image, angle, new int[] { tx, ty }, scale, new float[] { sx, sy }, InterpolationMode.Bilinear);
-            mask = SafeAffine(mask, angle, new int[] { tx, ty }, scale, new float[] { sx, sy }, InterpolationMode.Bilinear);
+            mask = SafeAffine(mask, angle, new int[] { tx, ty }, scale, new float[] { sx, sy }, InterpolationMode.Nearest);
 
             return (image, mask);
         }
@@ -155,7 +155,10 @@ namespace AnnotationTool.Ai.Utils
         private readonly int value;
         private readonly Random rng = new Random();
 
-        public AdjustBrightness(int value) { this.value = value; }
+        public AdjustBrightness(int value)
+        {
+            this.value = value;
+        }
 
         public (Tensor image, Tensor mask) Apply(Tensor image, Tensor mask)
         {
