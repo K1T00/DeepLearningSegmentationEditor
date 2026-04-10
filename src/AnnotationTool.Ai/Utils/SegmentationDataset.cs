@@ -1,6 +1,8 @@
 ﻿using AnnotationTool.Ai.Models;
+using AnnotationTool.Core.Models;
 using AnnotationTool.Core.Services;
 using OpenCvSharp;
+using System;
 using System.Collections.Generic;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
 using static TorchSharp.torch;
@@ -10,111 +12,87 @@ namespace AnnotationTool.Ai.Utils
 {
     public class SegmentationDataset : utils.data.Dataset
     {
-        private readonly List<Tensor> data = new List<Tensor>();
-        private readonly List<Tensor> masks = new List<Tensor>();
-        private readonly IPairedTransform transforms;
-        private readonly int count;
-        private readonly Device device;
         private readonly IReadOnlyList<(string imagePath, string maskPath)> imagePairs;
-        private readonly IProjectPresenter project;
+        private readonly IPairedTransform transforms;
         private readonly SegmentationModelConfig cfg;
+        private readonly bool trainAsGreyscale;
+        private readonly bool binaryMode;
+        private readonly NormalizationSettings normalization;
 
         public SegmentationDataset(
             IReadOnlyList<(string imagePath, string maskPath)> imagePairs,
             IProjectPresenter project,
-            Device device,
             IPairedTransform transforms,
-            SegmentationModelConfig cfg)
+            SegmentationModelConfig cfg,
+            Func<Mat, bool> maskFilter = null)
         {
-            this.imagePairs = imagePairs;
-            this.device = device;
             this.transforms = transforms;
-            this.project = project;
             this.cfg = cfg;
-            this.count = ReadFiles(); // ToDo: Lazy loading of files instead of reading all at once. Maybe optionall based on size of dataset.
+            this.trainAsGreyscale = project.Project.Settings.PreprocessingSettings.TrainAsGreyscale;
+            this.binaryMode = project.Project.Features.Count == 1;
+            this.normalization = project.Project.Settings.PreprocessingSettings.Normalization;
+            this.imagePairs = maskFilter == null
+                ? imagePairs
+                : FilterPairs(imagePairs, maskFilter);
         }
 
-        private int ReadFiles()
-        {
-            // For every image there needs to be one mask per feature
-            for (var imIdx = 0; imIdx < imagePairs.Count; imIdx++)
-            {
-                // Images
-                if (project.Project.Settings.PreprocessingSettings.TrainAsGreyscale)
-                {
-                    using (var img = Cv2.ImRead(imagePairs[imIdx].imagePath, ImreadModes.Grayscale))
-                    {
-                        data.Add(
-                            GreyMatToNormalizedTensor(
-                                img,
-                                device,
-                                cfg.TrainPrecision,
-                                project.Project.Settings.PreprocessingSettings.Normalization)
-                            );
-                    }
-                }
-                else
-                {
-                    using (var img = Cv2.ImRead(imagePairs[imIdx].imagePath, ImreadModes.Color))
-                    {
-                        data.Add(
-                            RgbMatToNormalizedTensor(
-                                img,
-                                device,
-                                cfg.TrainPrecision,
-                                project.Project.Settings.PreprocessingSettings.Normalization)
-                            );
-                    }
-                }
-                // Masks
-                using (var mskGrey = Cv2.ImRead(imagePairs[imIdx].maskPath, ImreadModes.Grayscale))
-                {
-                    if (project.Project.Features.Count == 1)
-                    {
-                        masks.Add(BinaryMaskToTensor(mskGrey, device));
-                    }
-                    else
-                    {
-                        masks.Add(MulticlassMaskToTensor(mskGrey, device));
-                    }
-                }
-            }
-            return data.Count;
-        }
+        public override long Count => imagePairs.Count;
 
-        /// <summary>
-        /// Get tensor according to index
-        /// </summary>
-        /// <param name="index">Index for tensor</param>
-        /// <returns>Tensors of index.</returns>
         public override Dictionary<string, Tensor> GetTensor(long index)
         {
+            var pair = imagePairs[(int)index];
+
             using (var scope = NewDisposeScope())
+            using (var image = Cv2.ImRead(pair.imagePath, trainAsGreyscale ? ImreadModes.Grayscale : ImreadModes.Color))
+            using (var mask = Cv2.ImRead(pair.maskPath, ImreadModes.Grayscale))
             {
-                var image = data[(int)index];
-                var mask = masks[(int)index];
+                if (image.Empty())
+                    throw new InvalidOperationException($"Could not load image '{pair.imagePath}'.");
+
+                if (mask.Empty())
+                    throw new InvalidOperationException($"Could not load mask '{pair.maskPath}'.");
+
+                // Keep tensors on CPU here. Let DataLoader or trainer move them to the target device.
+                var imageTensor = trainAsGreyscale
+                    ? GreyMatToNormalizedTensor(image, CPU, cfg.TrainPrecision, normalization)
+                    : RgbMatToNormalizedTensor(image, CPU, cfg.TrainPrecision, normalization);
+
+                var maskTensor = binaryMode
+                    ? BinaryMaskToTensor(mask, CPU)
+                    : MulticlassMaskToTensor(mask, CPU);
 
                 if (transforms != null)
                 {
-                    var result = transforms.Apply(image, mask);
-                    image = result.image;
-                    mask = result.mask;
+                    var result = transforms.Apply(imageTensor, maskTensor);
+                    imageTensor = result.image;
+                    maskTensor = result.mask;
                 }
 
-                return new Dictionary<string, Tensor>{
-                    { "data", image.MoveToOuterDisposeScope() },
-                    { "masks", mask.MoveToOuterDisposeScope() }
+                return new Dictionary<string, Tensor>
+                {
+                    ["data"] = imageTensor.MoveToOuterDisposeScope(),
+                    ["masks"] = maskTensor.MoveToOuterDisposeScope()
                 };
             }
         }
 
-        public override long Count => count;
-
-        protected override void Dispose(bool disposing)
+        private static IReadOnlyList<(string imagePath, string maskPath)> FilterPairs(IReadOnlyList<(string imagePath, string maskPath)> source, Func<Mat, bool> maskFilter)
         {
-            if (!disposing) return;
-            data.ForEach(d => d.Dispose());
-            masks.ForEach(d => d.Dispose());
+            var filtered = new List<(string imagePath, string maskPath)>(source.Count);
+
+            foreach (var pair in source)
+            {
+                using (var mask = Cv2.ImRead(pair.maskPath, ImreadModes.Grayscale))
+                {
+                    if (mask.Empty())
+                        throw new InvalidOperationException($"Could not load mask '{pair.maskPath}'.");
+
+                    if (maskFilter(mask))
+                        filtered.Add(pair);
+                }
+            }
+
+            return filtered;
         }
     }
 }

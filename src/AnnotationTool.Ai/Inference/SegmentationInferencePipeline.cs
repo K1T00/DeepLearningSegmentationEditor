@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using TorchSharp;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageUtils;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
+using static AnnotationTool.Ai.Utils.CudaOps.NativeTorchCudaOps;
 using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Inference
@@ -22,7 +23,7 @@ namespace AnnotationTool.Ai.Inference
     /// <summary>
     /// Universal inference pipeline that works for ANY model that implements ISegmentationModel.
     /// 
-    /// Currently runs inference on project.Project.Images one by one (ToDo: run batch sized)
+    /// Currently, runs inference on project.Project.Images one by one (ToDo: run batch sized)
     /// </summary>
     public class SegmentationInferencePipeline : ISegmentationInferencePipeline
     {
@@ -30,11 +31,7 @@ namespace AnnotationTool.Ai.Inference
         private readonly ILogger<SegmentationInferencePipeline> logger;
         private readonly IModelComplexityConfigProvider complexityProvider;
 
-        public SegmentationInferencePipeline(
-            ISegmentationModelFactory modelFactory,
-            ILogger<SegmentationInferencePipeline> logger,
-            IProjectOptionsService projectOptionsService,
-            IModelComplexityConfigProvider complexityProvider)
+        public SegmentationInferencePipeline(ISegmentationModelFactory modelFactory, ILogger<SegmentationInferencePipeline> logger, IModelComplexityConfigProvider complexityProvider)
         {
             this.modelFactory = modelFactory;
             this.logger = logger;
@@ -139,7 +136,7 @@ namespace AnnotationTool.Ai.Inference
 
                                 if (device.type == DeviceType.CUDA)
                                 {
-                                    NativeTorchCudaOps.EmptyCudaCache();
+                                    EmptyCudaCache();
                                 }
 
                                 if (ct.IsCancellationRequested)
@@ -156,7 +153,7 @@ namespace AnnotationTool.Ai.Inference
             {
                 if (device.type == DeviceType.CUDA)
                 {
-                    NativeTorchCudaOps.EmptyCudaCache();
+                    EmptyCudaCache();
                 }
             }
 

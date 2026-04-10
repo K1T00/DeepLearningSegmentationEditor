@@ -5,21 +5,21 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TorchSharp;
+using static AnnotationTool.Ai.Utils.CudaOps.NativeTorchCudaOps;
 using static AnnotationTool.Ai.Utils.LossFunctions;
 using static TorchSharp.torch;
 using static TorchSharp.torch.optim;
 using static TorchSharp.torch.optim.lr_scheduler.impl;
-using static TorchSharp.torch.nn.utils;
 
 namespace AnnotationTool.Ai.Training
 {
     /// <summary>
     /// Generic segmentation trainer.
+    /// Stateless across runs: all runtime state is passed through TrainingContext.
     /// </summary>
-    public class SegmentationTrainer
+    public sealed class SegmentationTrainer
     {
         private readonly ILogger<SegmentationTrainer> logger;
-        private TrainingContext ctx;
 
         public SegmentationTrainer(ILogger<SegmentationTrainer> logger)
         {
@@ -28,8 +28,6 @@ namespace AnnotationTool.Ai.Training
 
         public async Task RunTrainer(TrainingContext ctx, IProgress<LossReport> lossProgress, CancellationToken ct)
         {
-            this.ctx = ctx;
-
             try
             {
                 var stoppingSettings = ctx.Settings.TrainingStoppingSettings;
@@ -39,124 +37,164 @@ namespace AnnotationTool.Ai.Training
                     : int.MaxValue;
 
                 double? smoothedValLoss = null;
-                var epoch = 1;
 
-                while (epoch <= maxEpochs && !ct.IsCancellationRequested)
+                for (var epoch = 1; epoch <= maxEpochs; epoch++)
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var trainLoss = TrainEpoch();
-                    var valLoss = ValidateEpoch();
+                    var trainLoss = TrainEpoch(ctx, ct);
+                    var valLoss = ValidateEpoch(ctx, ct);
 
-                    if (ctx.Optimization.Scheduler != null)
-                    {
-                        if (ctx.Optimization.SchedulerRequiresMetric)
-                        {
-                            smoothedValLoss = smoothedValLoss.HasValue
-                                ? 0.7 * smoothedValLoss.Value + 0.3 * valLoss
-                                : valLoss;
+                    UpdateScheduler(ctx, trainLoss, valLoss, ref smoothedValLoss);
 
-                            var plateauScheduler = ctx.Optimization.Scheduler as ReduceLROnPlateau;
-                            if (plateauScheduler != null)
-                                plateauScheduler.step(smoothedValLoss.Value);
-                            else
-                                ctx.Optimization.Scheduler.step();
-                        }
-                        else
-                        {
-                            ctx.Optimization.Scheduler.step();
-                        }
-                    }
-
-                    ReportProgress(logger, lossProgress, epoch, trainLoss, valLoss, GetLearningRate(ctx.Optimization.Optimizer));
+                    ReportProgress(
+                        logger,
+                        lossProgress,
+                        epoch,
+                        trainLoss,
+                        valLoss,
+                        GetLearningRate(ctx.Optimization.Optimizer));
 
                     if (ctx.StoppingMonitor.ShouldStop(epoch, valLoss, out var reason))
                     {
                         logger.LogInformation("Training stopped: {Reason}", reason);
                         break;
                     }
-                    epoch++;
+
                     await Task.Yield();
                 }
             }
             finally
             {
                 if (ctx.Device.type == DeviceType.CUDA)
-                    NativeTorchCudaOps.EmptyCudaCache();
+                {
+                    EmptyCudaCache();
+                }
             }
-
         }
 
-        private float TrainEpoch()
+        private float TrainEpoch(TrainingContext ctx, CancellationToken ct)
         {
             ctx.Model.AsModule().train();
+
             var totalLoss = 0.0f;
             var batchCount = 0;
 
-            using (var d = NewDisposeScope())
+            using (var scope = NewDisposeScope())
             using (var useGrad = enable_grad())
             {
                 foreach (var batch in ctx.TrainLoader)
                 {
-                    // Execute model
-                    var prediction = ctx.Model.AsModule().call(batch["data"]);
-
-                    // Compute the loss: Comparing result tensor with ground truth tensor
-                    var computedLoss = ctx.SegmentationMode == SegmentationMode.Binary
-                        ? ComputeBinarySegmentationLoss(prediction, batch["masks"])
-                        : ComputeMulticlassSegmentationLoss(prediction, batch["masks"]);
-
-                    totalLoss += computedLoss.ToSingle();
-                    batchCount++;
-
-                    // Clear the gradients before doing the back-propagation
-                    ctx.Optimization.Optimizer.zero_grad();
-
-                    // Do back-propagation, which computes all the gradients
-                    computedLoss.backward();
-
-                    // Adjust the weights using the (newly calculated) gradients
-                    if (ctx.Optimization.GradientClipNorm.HasValue)
+                    using (var batchScope = NewDisposeScope())
                     {
-                        clip_grad_norm_(
-                            ctx.Model.AsModule().parameters(),
-                            ctx.Optimization.GradientClipNorm.Value);
+                        var input = batch["data"].to(ctx.Device).MoveToOuterDisposeScope();
+                        var target = batch["masks"].to(ctx.Device).MoveToOuterDisposeScope();
+
+                        var prediction = ctx.Model.AsModule().call(input);
+                        var computedLoss = ComputeLoss(ctx, prediction, target);
+
+                        totalLoss += computedLoss.ToSingle();
+                        batchCount++;
+
+                        ctx.Optimization.Optimizer.zero_grad();
+                        computedLoss.backward();
+
+                        //ToDo: Add gradient clipping as an option in settings if needed. For now, it's commented out.
+                        //if (ctx.Optimization.GradientClipNorm.HasValue)
+                        //{
+                        //    clip_grad_norm_(
+                        //        ctx.Model.AsModule().parameters(),
+                        //        ctx.Optimization.GradientClipNorm.Value);
+                        //}
+
+                        ctx.Optimization.Optimizer.step();
                     }
-
-                    ctx.Optimization.Optimizer.step();
-
-                    d.DisposeEverything();
                 }
             }
-            return batchCount > 0 ? totalLoss / batchCount : 0;
+
+            return batchCount > 0 ? totalLoss / batchCount : 0f;
         }
 
-        private float ValidateEpoch()
+        private float ValidateEpoch(TrainingContext ctx, CancellationToken ct)
         {
             ctx.Model.AsModule().eval();
+
             var totalLoss = 0.0f;
             var batchCount = 0;
 
-            using (var d = NewDisposeScope())
+            using (var scope = NewDisposeScope())
             using (var noGrad = no_grad())
             {
-                //using var inferenceMode = inference_mode(true);
-
                 foreach (var batch in ctx.ValLoader)
                 {
-                    var prediction = ctx.Model.AsModule().call(batch["data"]);
+                    using (var batchScope = NewDisposeScope())
+                    {
+                        var input = batch["data"].to(ctx.Device).MoveToOuterDisposeScope();
+                        var target = batch["masks"].to(ctx.Device).MoveToOuterDisposeScope();
 
-                    var computedLoss = ctx.SegmentationMode == SegmentationMode.Binary
-                        ? ComputeBinarySegmentationLoss(prediction, batch["masks"])
-                        : ComputeMulticlassSegmentationLoss(prediction, batch["masks"]);
+                        var prediction = ctx.Model.AsModule().call(input);
+                        var computedLoss = ComputeLoss(ctx, prediction, target);
 
-                    totalLoss += computedLoss.ToSingle();
-                    batchCount++;
-
-                    d.DisposeEverything();
+                        totalLoss += computedLoss.ToSingle();
+                        batchCount++;
+                    }
                 }
             }
-            return batchCount > 0 ? totalLoss / batchCount : 0;
+
+            return batchCount > 0 ? totalLoss / batchCount : 0f;
+        }
+
+        private static Tensor ComputeLoss(TrainingContext ctx, Tensor prediction, Tensor target)
+        {
+            return ctx.SegmentationMode == SegmentationMode.Binary
+                ? ComputeBinarySegmentationLoss(prediction, target)
+                : ComputeMulticlassSegmentationLoss(prediction, target);
+        }
+
+        private static void UpdateScheduler(
+            TrainingContext ctx,
+            float trainLoss,
+            float valLoss,
+            ref double? smoothedValLoss)
+        {
+            var scheduler = ctx.Optimization.Scheduler;
+            if (scheduler == null)
+            {
+                return;
+            }
+
+            if (ctx.Optimization.LegacyMode)
+            {
+                if (scheduler is ReduceLROnPlateau legacyPlateau)
+                {
+                    legacyPlateau.step(trainLoss);
+                }
+                else
+                {
+                    scheduler.step();
+                }
+
+                return;
+            }
+
+            if (!ctx.Optimization.SchedulerRequiresMetric)
+            {
+                scheduler.step();
+                return;
+            }
+
+            smoothedValLoss = smoothedValLoss.HasValue
+                ? 0.7 * smoothedValLoss.Value + 0.3 * valLoss
+                : valLoss;
+
+            if (scheduler is ReduceLROnPlateau plateauScheduler)
+            {
+                plateauScheduler.step(smoothedValLoss.Value);
+            }
+            else
+            {
+                scheduler.step();
+            }
         }
 
         private static void ReportProgress(
@@ -172,14 +210,19 @@ namespace AnnotationTool.Ai.Training
                 Epoch = epoch,
                 TrainLoss = (float)Math.Round(trainLoss, 4),
                 ValidationLoss = (float)Math.Round(valLoss, 4),
-                LearningRate = (float)Math.Round(learningRate, 4)
+                LearningRate = (float)Math.Round(learningRate, 8)
             });
 
             logger.LogInformation(
-                "Epoch: " + epoch + Environment.NewLine +
-                "TrainLoss: " + (float)Math.Round(trainLoss, 4) + Environment.NewLine +
-                "ValLoss: " + (float)Math.Round(valLoss, 4) + Environment.NewLine +
-                "LearningRate: " + (float)Math.Round(learningRate, 8) + Environment.NewLine);
+                "Epoch: {Epoch}{NewLine}TrainLoss: {TrainLoss}{NewLine}ValLoss: {ValLoss}{NewLine}LearningRate: {LearningRate}{NewLine}",
+                epoch,
+                Environment.NewLine,
+                Math.Round(trainLoss, 4),
+                Environment.NewLine,
+                Math.Round(valLoss, 4),
+                Environment.NewLine,
+                Math.Round(learningRate, 8),
+                Environment.NewLine);
         }
 
         private static double GetLearningRate(Optimizer optimizer)
@@ -187,6 +230,5 @@ namespace AnnotationTool.Ai.Training
             var paramGroup = optimizer.ParamGroups.FirstOrDefault();
             return paramGroup != null ? paramGroup.LearningRate : 0.0;
         }
-
     }
 }

@@ -58,16 +58,16 @@ namespace AnnotationTool.Ai.Utils
         /// </summary>
         public static unsafe Mat BuildClassMapUnsafe(IReadOnlyList<Mat> probs)
         {
-            int h = probs[0].Rows;
-            int w = probs[0].Cols;
-            int classCount = probs.Count;
+            var h = probs[0].Rows;
+            var w = probs[0].Cols;
+            var classCount = probs.Count;
 
             var classMap = new Mat(h, w, MatType.CV_8UC1, Scalar.Black);
 
-            byte*[] probPtrs = new byte*[classCount];
-            int[] strides = new int[classCount];
+            var probPtrs = new byte*[classCount];
+            var strides = new int[classCount];
 
-            for (int c = 0; c < classCount; c++)
+            for (var c = 0; c < classCount; c++)
             {
                 if (probs[c].Type() != MatType.CV_8UC1)
                     throw new ArgumentException("Probability maps must be CV_8UC1.");
@@ -75,25 +75,25 @@ namespace AnnotationTool.Ai.Utils
                 if (probs[c].Rows != h || probs[c].Cols != w)
                     throw new ArgumentException("Probability map size mismatch.");
 
-                probPtrs[c] = (byte*)probs[c].DataPointer;
+                probPtrs[c] = probs[c].DataPointer;
                 strides[c] = (int)probs[c].Step();
             }
 
-            byte* dstBase = (byte*)classMap.DataPointer;
-            int dstStride = (int)classMap.Step();
+            var dstBase = classMap.DataPointer;
+            var dstStride = (int)classMap.Step();
 
-            for (int y = 0; y < h; y++)
+            for (var y = 0; y < h; y++)
             {
-                byte* dstRow = dstBase + y * dstStride;
+                var dstRow = dstBase + y * dstStride;
 
-                for (int x = 0; x < w; x++)
+                for (var x = 0; x < w; x++)
                 {
                     byte bestProb = 0;
                     byte bestClass = 0;
 
-                    for (int c = 0; c < classCount; c++)
+                    for (var c = 0; c < classCount; c++)
                     {
-                        byte p = *(probPtrs[c] + y * strides[c] + x);
+                        var p = *(probPtrs[c] + y * strides[c] + x);
                         if (p > bestProb)
                         {
                             bestProb = p;
@@ -108,23 +108,34 @@ namespace AnnotationTool.Ai.Utils
             return classMap;
         }
 
-        public static SegmentationStats ComputeMulticlassMetrics(Mat predictedClassMap, Mat groundTruthClassMap, int numClasses)
+        public static unsafe SegmentationStats ComputeMulticlassMetrics(Mat predictedClassMap, Mat groundTruthClassMap, int numClasses)
         {
             var stats = new SegmentationStats();
 
-            long[] tp = new long[numClasses];
-            long[] fp = new long[numClasses];
-            long[] fn = new long[numClasses];
+            var tp = new long[numClasses];
+            var fp = new long[numClasses];
+            var fn = new long[numClasses];
 
-            int h = predictedClassMap.Rows;
-            int w = predictedClassMap.Cols;
+            var h = predictedClassMap.Rows;
+            var w = predictedClassMap.Cols;
 
-            for (int y = 0; y < h; y++)
+            var predBase = predictedClassMap.DataPointer;
+            var gtBase = groundTruthClassMap.DataPointer;
+            var predStride = (int)predictedClassMap.Step();
+            var gtStride = (int)groundTruthClassMap.Step();
+
+            for (var y = 0; y < h; y++)
             {
-                for (int x = 0; x < w; x++)
+                var predRow = predBase + y * predStride;
+                var gtRow = gtBase + y * gtStride;
+
+                for (var x = 0; x < w; x++)
                 {
-                    byte pred = predictedClassMap.At<byte>(y, x);
-                    byte gt = groundTruthClassMap.At<byte>(y, x);
+                    var pred = predRow[x];
+                    var gt = gtRow[x];
+
+                    if (pred >= numClasses || gt >= numClasses)
+                        continue;
 
                     if (pred == gt)
                     {
@@ -138,40 +149,28 @@ namespace AnnotationTool.Ai.Utils
                 }
             }
 
-            double sumIoU = 0.0;
-            double sumDice = 0.0;
-            int validClassCount = 0;
+            var sumIoU = 0.0;
+            var sumDice = 0.0;
+            var validClassCount = 0;
 
             // Skip background (class 0) in reported averages
-            for (int c = 1; c < numClasses; c++)
+            for (var c = 1; c < numClasses; c++)
             {
-                long tpc = tp[c];
-                long fpc = fp[c];
-                long fnc = fn[c];
+                var tpc = tp[c];
+                var fpc = fp[c];
+                var fnc = fn[c];
 
-                long denomIoU = tpc + fpc + fnc;
+                var denomIoU = tpc + fpc + fnc;
                 if (denomIoU == 0)
-                    continue; // class absent in both pred & gt
+                    continue;
 
-                double iou = (double)tpc / denomIoU;
-                double dice = (2.0 * tpc) / (2.0 * tpc + fpc + fnc);
-
-                sumIoU += iou;
-                sumDice += dice;
+                sumIoU += (double)tpc / denomIoU;
+                sumDice += (2.0 * tpc) / (2.0 * tpc + fpc + fnc);
                 validClassCount++;
             }
 
-            if (validClassCount > 0)
-            {
-                stats.IoU = sumIoU / validClassCount;
-                stats.Dice = sumDice / validClassCount;
-            }
-            else
-            {
-                stats.IoU = 0.0;
-                stats.Dice = 0.0;
-            }
-
+            stats.IoU = validClassCount > 0 ? sumIoU / validClassCount : 0.0;
+            stats.Dice = validClassCount > 0 ? sumDice / validClassCount : 0.0;
             stats.Accuracy = tp.Sum() / (double)(h * w);
 
             return stats;
@@ -235,26 +234,30 @@ namespace AnnotationTool.Ai.Utils
             {
                 using (var img = Cv2.ImRead(path, ImreadModes.Color))
                 {
-                    int h = img.Rows;
-                    int w = img.Cols;
+                    var h = img.Rows;
+                    var w = img.Cols;
+                    var data = img.DataPointer;
+                    var stride = (int)img.Step();
 
-                    byte* data = (byte*)img.DataPointer;
-                    int stride = (int)img.Step();
-
-                    for (int y = 0; y < h; y++)
+                    for (var y = 0; y < h; y++)
                     {
-                        byte* row = data + y * stride;
+                        var row = data + y * stride;
 
-                        for (int x = 0; x < w; x++)
+                        for (var x = 0; x < w; x++)
                         {
-                            byte* px = row + x * 3;
+                            var px = row + x * 3;
 
-                            float b = px[0] * inv255;
-                            float g = px[1] * inv255;
-                            float r = px[2] * inv255;
+                            var b = px[0] * inv255;
+                            var g = px[1] * inv255;
+                            var r = px[2] * inv255;
 
-                            sumR += r; sumG += g; sumB += b;
-                            sqR += r * r; sqG += g * g; sqB += b * b;
+                            sumR += r;
+                            sumG += g;
+                            sumB += b;
+
+                            sqR += r * r;
+                            sqG += g * g;
+                            sqB += b * b;
 
                             count++;
                         }
@@ -262,13 +265,13 @@ namespace AnnotationTool.Ai.Utils
                 }
             }
 
-            float meanR = (float)(sumR / count);
-            float meanG = (float)(sumG / count);
-            float meanB = (float)(sumB / count);
+            var meanR = (float)(sumR / count);
+            var meanG = (float)(sumG / count);
+            var meanB = (float)(sumB / count);
 
-            float stdR = (float)Math.Sqrt(sqR / count - meanR * meanR);
-            float stdG = (float)Math.Sqrt(sqG / count - meanG * meanG);
-            float stdB = (float)Math.Sqrt(sqB / count - meanB * meanB);
+            var stdR = (float)Math.Sqrt(sqR / count - meanR * meanR);
+            var stdG = (float)Math.Sqrt(sqG / count - meanG * meanG);
+            var stdB = (float)Math.Sqrt(sqB / count - meanB * meanB);
 
             // avoid division-by-zero during normalization
             if (stdR < 1e-6f) stdR = 1e-6f;
@@ -298,19 +301,18 @@ namespace AnnotationTool.Ai.Utils
             {
                 using (var img = Cv2.ImRead(path, ImreadModes.Grayscale))
                 {
-                    int h = img.Rows;
-                    int w = img.Cols;
+                    var h = img.Rows;
+                    var w = img.Cols;
+                    var data = img.DataPointer;
+                    var stride = (int)img.Step();
 
-                    byte* data = (byte*)img.DataPointer;
-                    int stride = (int)img.Step();
-
-                    for (int y = 0; y < h; y++)
+                    for (var y = 0; y < h; y++)
                     {
-                        byte* row = data + y * stride;
+                        var row = data + y * stride;
 
-                        for (int x = 0; x < w; x++)
+                        for (var x = 0; x < w; x++)
                         {
-                            float v = row[x] * inv255;
+                            var v = row[x] * inv255;
                             sum += v;
                             sq += v * v;
                             count++;
@@ -319,8 +321,8 @@ namespace AnnotationTool.Ai.Utils
                 }
             }
 
-            float mean = (float)(sum / count);
-            float std = (float)Math.Sqrt(sq / count - mean * mean);
+            var mean = (float)(sum / count);
+            var std = (float)Math.Sqrt(sq / count - mean * mean);
             if (std < 1e-6f) std = 1e-6f;
 
             return new NormalizationSettings

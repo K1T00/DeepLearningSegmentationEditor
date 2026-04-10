@@ -15,13 +15,12 @@ namespace AnnotationTool.Ai.Training
         {
             Mat[] imgTiles = null;
             Mat[] maskTiles = null;
-
             var paths = project.Paths;
 
             try
             {
-                int processed = 0;
-                int total = project.Project.Images.Count;
+                var processed = 0;
+                var total = project.Project.Images.Count;
 
                 foreach (var img in project.Project.Images)
                 {
@@ -45,14 +44,14 @@ namespace AnnotationTool.Ai.Training
                         imgTiles = preProc.ProcessImage(image);
                         maskTiles = preProc.ProcessImage(maskGt);
 
-                        for (int i = 0; i < imgTiles.Length; i++)
+                        for (var i = 0; i < imgTiles.Length; i++)
                         {
                             if (project.Project.Settings.PreprocessingSettings.TrainOnlyFeatures)
                             {
                                 if (!TileContainsForeground(maskTiles[i]))
                                     continue;
                             }
-                            string baseName = $"{img.Guid}_{i:D4}";
+                            var baseName = $"{img.Guid}_{i:D4}";
                             Cv2.ImWrite(Path.Combine(paths.SlicedImages, baseName + paths.ImagesExt), imgTiles[i]);
                             Cv2.ImWrite(Path.Combine(paths.SlicedMasks, baseName + paths.ImagesExt), maskTiles[i]);
                         }
@@ -80,7 +79,7 @@ namespace AnnotationTool.Ai.Training
 
         private static bool TileContainsForeground(Mat maskTile)
         {
-            // any non-zero pixel ?
+            // Check for any non-zero pixel
             return Cv2.CountNonZero(maskTile) > 0;
         }
     }

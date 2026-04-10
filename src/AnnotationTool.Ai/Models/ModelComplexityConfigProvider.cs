@@ -13,8 +13,8 @@ namespace AnnotationTool.Ai.Models
     ///         Depth = 2                            Depth = 3                             Depth = 4
     ///         Filters: 32→64                       Filters: 64→128→256                   Filters: 96→192→384→768
     ///
-    ///			Downsampling: MaxPool			  	 Downsampling: StridedConv		  	   Downsampling: StridedConv
-    ///			Upsampling: Interpolation		  	 Upsampling: Interpolation			   Upsampling: ConvTranspose2d
+    ///			DownSampling: MaxPool			  	 DownSampling: StridedConv		  	   DownSampling: StridedConv
+    ///			UpSampling: Interpolation		  	 UpSampling: Interpolation			   UpSampling: ConvTranspose2d
     ///
     ///			Attention: OFF					  	 Attention: Optional				   Attention: ON
     ///			Dropout: OFF					  	 Dropout: OFF					       Dropout:  ON
@@ -36,7 +36,7 @@ namespace AnnotationTool.Ai.Models
     ///             Output                          Output                                    Output
     ///                                                                                
     ///                
-    /// !!!!!!!!!!    Check ModelComplexityConfigFactory for current deployed config values.    !!!!!!!!!! 
+    /// !!!!!!!!!!    Check ModelComplexityConfigFactory for currently deployed config values.    !!!!!!!!!! 
     /// 
     public class ModelComplexityConfigProvider : IModelComplexityConfigProvider
     {
