@@ -67,6 +67,8 @@ namespace AnnotationTool.Ai.Training
         /// which automatic optimization policy was chosen.
         /// </summary>
         public string PolicySummary { get; set; }
+
+        public bool LegacyMode { get; set; } = false;
     }
 
     /// <summary>

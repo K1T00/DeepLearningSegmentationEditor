@@ -33,14 +33,14 @@ namespace AnnotationTool.Ai.Utils
                 throw new ArgumentException("Dataset size must be > 0");
 
             // Never exceed dataset size
-            int batchSize = Math.Min(estimatedBatchSize, datasetSize);
+            var batchSize = Math.Min(estimatedBatchSize, datasetSize);
 
             // If everything fits in one batch, that's optimal
             if (batchSize == datasetSize)
                 return batchSize;
 
             // If the remaining batch would be too small, rebalance
-            int remainder = datasetSize % batchSize;
+            var remainder = datasetSize % batchSize;
 
             if (remainder > 0 && remainder < minBatchSize)
             {

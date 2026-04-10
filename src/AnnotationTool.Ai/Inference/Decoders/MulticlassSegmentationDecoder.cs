@@ -44,7 +44,7 @@ namespace AnnotationTool.Ai.Inference.Decoders
                     var result = new Dictionary<int, Mat[]>();
 
                     // Skip background class 0
-                    for (int classId = 1; classId < numClasses; classId++)
+                    for (var classId = 1; classId < numClasses; classId++)
                     {
                         // Select probability map for classId → [N,H,W] with unsqueeze for [N,1,H,W]
                         using (var classProb = probs.select(1, classId).unsqueeze(1))
@@ -64,7 +64,6 @@ namespace AnnotationTool.Ai.Inference.Decoders
         /// </summary>
         public Dictionary<int, SegmentationStats> ComputeMetrics(Dictionary<int, Mat> fullMaskPredictions, Mat groundTruth)
         {
-
             var result = new Dictionary<int, SegmentationStats>();
 
             foreach (var kv in fullMaskPredictions)

@@ -54,13 +54,13 @@ namespace AnnotationTool.Ai.Training
                 scheduler = StepLR(
                     optimizer,
                     step_size: stepSize,
-                    gamma: 0.2);
+                    gamma: 0.5);
 
                 schedulerRequiresMetric = false;
                 schedulerName = "StepLR";
             }
 
-            var gradientClipNorm = 1.0;
+            const double gradientClipNorm = 1.0;
 
             return new TrainingOptimizationContext
             {
@@ -99,10 +99,10 @@ namespace AnnotationTool.Ai.Training
         private static double GetBaseLearningRate(SegmentationModelConfig modelConfig)
         {
             if (modelConfig.Depth <= 2 && modelConfig.FirstFilter <= 32)
-                return 0.10;
+                return 0.05;
 
             if (modelConfig.Depth <= 3 && modelConfig.FirstFilter <= 64)
-                return 0.07;
+                return 0.01;
 
             return 0.05;
         }
@@ -217,5 +217,51 @@ namespace AnnotationTool.Ai.Training
         {
             return value.ToString("0.#####E+0", CultureInfo.InvariantCulture);
         }
+
+        public static TrainingOptimizationContext Build_old(ISegmentationModel model, DeepLearningSettings settings, SegmentationModelConfig modelConfig, int batchSize)
+        {
+            const double learningRate = 0.05;
+            //const int maxEpochs = 200;
+
+            var optimizer = SGD(model.AsModule().parameters(), learningRate, 0.9, 0, learningRate); // lr: 0.05
+            //var optimizer = AdamW(model.AsModule().parameters(), learningRate); // lr: 0.001
+            //var optimizer = Adam(model.AsModule().parameters(), learningRate); // lr: 0.001
+
+            var scheduler = StepLR(optimizer, 15, 0.75); // lr: 0.05
+            //var scheduler = StepLR(optimizer, Convert.ToInt32(0.8 * maxEpochs), 0.6);
+            //var scheduler = ReduceLROnPlateau(optimizer, "min", 0.5, 5, verbose: true);
+            //var scheduler = OneCycleLR(optimizer, 1e-3, 5, 90, anneal_strategy: impl.OneCycleLR.AnnealStrategy.Cos);
+            //var scheduler = CosineAnnealingLR(optimizer, 25);
+
+            return new TrainingOptimizationContext
+            {
+                Optimizer = optimizer,
+                Scheduler = scheduler,
+                SchedulerRequiresMetric = false,
+                InitialLearningRate = 0,
+                WeightDecay = 0,
+                MinLearningRate = null,
+                OptimizerName = "SGD",
+                SchedulerName = "StepLR",
+                GradientClipNorm = 0,
+                PolicySummary = BuildPolicySummary(
+                    "AdamW",
+                    "StepLR",
+                    0.05,
+                    0,
+                    0,
+                    0,
+                    batchSize,
+                    modelConfig,
+                    settings.PreprocessingSettings,
+                    settings.TrainingStoppingSettings),
+                LegacyMode = true
+            };
+        }
+
+
+
+
+
     }
 }
