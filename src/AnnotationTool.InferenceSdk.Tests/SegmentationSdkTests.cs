@@ -7,8 +7,8 @@ namespace AnnotationTool.Tests
 {
     public class SegmentationSdkTests
     {
-        private const string modelTestFile = @"D:\_DEV\Ai\TestDeepLearningSdk\TestData\Models\Model_2026_01_06_09_28_28.bin";
-        private const string settingsTestFile = @"D:\_DEV\Ai\TestDeepLearningSdk\TestData\Models\Trainingsettings_2026_01_06_09_28_28.json";
+        private const string modelTestFile = @"D:\_DEV\Ai\TestDeepLearningSdk\TestData\Models\Model_2026_04_11_15_16_26.bin";
+        private const string settingsTestFile = @"D:\_DEV\Ai\TestDeepLearningSdk\TestData\Models\Trainingsettings_2026_04_11_15_16_26.json";
         private const string imageTestFile = @"D:\_DEV\Ai\TestDeepLearningSdk\TestData\Images\27b4b6d4-4833-411c-a02f-75153221e913.png";
 
 

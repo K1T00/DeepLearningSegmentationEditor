@@ -1,5 +1,4 @@
-﻿using AnnotationTool.Core.Models;
-using static TorchSharp.torch;
+﻿using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models
 {
@@ -16,6 +15,6 @@ namespace AnnotationTool.Ai.Models
         /// <summary>
         /// Creates a segmentation model for the given settings + device.
         /// </summary>
-        ISegmentationModel Create(DeepLearningProject project, Device device, SegmentationModelConfig cfg);
+        ISegmentationModel Create(int inChannels, int numClasses, SegmentationModelConfig cfg, Device device);
     }
 }

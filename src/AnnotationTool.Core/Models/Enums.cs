@@ -17,9 +17,10 @@
     public enum ComputeDevice { Cpu, Gpu }
     public enum BrushMode { None, MouseDown, MouseUp }
     public enum PipelineLoopState { Annotation, Training, InferenceResults }
-    public enum ModelComplexity { Low, Medium, High }
+    public enum ModelComplexity { L0, L1, L2, L3, L4, L5 }
     public enum AugmentationMode { Standard, Duplication, FeatureAware }
     public enum SegmentationMode { Binary, Multiclass } // Multilabel not implemented yet
+
     /// <summary>
     /// Defines the active interaction mode for the main image view.
     /// Exactly one mode should be active at a time.
@@ -47,5 +48,11 @@
         /// Region-of-interest manipulation (move / resize).
         /// </summary>
         Roi
+    }
+
+    public enum SegmentationArchitecture
+    {
+        UNet,
+        UNetPlusPlus
     }
 }

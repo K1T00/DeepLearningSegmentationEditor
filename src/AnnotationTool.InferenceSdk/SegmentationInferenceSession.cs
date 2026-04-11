@@ -1,5 +1,6 @@
 ﻿using AnnotationTool.Ai.Geometry;
 using AnnotationTool.Ai.Models;
+using AnnotationTool.Ai.Models.UNet;
 using AnnotationTool.Ai.Processing;
 using AnnotationTool.Core.Models;
 using OpenCvSharp;
@@ -8,6 +9,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using TorchSharp;
+using static AnnotationTool.Ai.Utils.CudaOps.NativeTorchCudaOps;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
 using static AnnotationTool.InferenceSdk.Utils;
 using static TorchSharp.torch;
@@ -118,16 +120,19 @@ namespace AnnotationTool.InferenceSdk
                 throw new InvalidOperationException("Failed to deserialize settings from JSON.");
             }
 
-            var config = ModelComplexityConfigFactory.Create(
-                settings.TrainModelSettings.ModelComplexity,
-                settings.PreprocessingSettings.SliceSize,
-                settings.PreprocessingSettings.SliceSize);
+            var segmentationMode = numClasses == 1
+                ? SegmentationMode.Binary
+                : SegmentationMode.Multiclass;
 
-            var model = SegmentationModelFactoryForSdk.Create(settings, torchDevice, config, numClasses);
+            var cfg = ModelComplexityConfigProviderSdk.GetConfig(settings.TrainModelSettings.SegmentationArchitecture, settings.TrainModelSettings.ModelComplexity);
 
-            model.load(modelPath).to(config.TrainPrecision, true).eval();
+            var inChannels = settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3;
 
-            return new SegmentationInferenceSession(model, settings, torchDevice, config, numClasses);
+            var model = UNetModelFactorySdk.Create(inChannels, numClasses, cfg, torchDevice).AsModule();
+
+            model.load(modelPath).to(cfg.TrainPrecision, true).eval();
+
+            return new SegmentationInferenceSession(model, settings, torchDevice, cfg, numClasses);
         }
 
         /// <summary>
@@ -277,7 +282,7 @@ namespace AnnotationTool.InferenceSdk
             disposed = true;
             model?.Dispose();
             if (device.type == DeviceType.CUDA)
-                NativeTorchCudaOps.EmptyCudaCache();
+                EmptyCudaCache();
         }
 
 

@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using TorchSharp;
 using static AnnotationTool.Ai.Utils.ImageProcessing.ImageUtils;
 using static AnnotationTool.Ai.Utils.TensorProcessing.TensorConversion;
+using static AnnotationTool.Ai.Utils.CudaOps.NativeTorchCudaOps;
 using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Inference
@@ -22,7 +23,7 @@ namespace AnnotationTool.Ai.Inference
     /// <summary>
     /// Universal inference pipeline that works for ANY model that implements ISegmentationModel.
     /// 
-    /// Currently runs inference on project.Project.Images one by one (ToDo: run batch sized)
+    /// Currently, runs inference on project.Project.Images one by one (ToDo: run batch sized)
     /// </summary>
     public class SegmentationInferencePipeline : ISegmentationInferencePipeline
     {
@@ -30,11 +31,7 @@ namespace AnnotationTool.Ai.Inference
         private readonly ILogger<SegmentationInferencePipeline> logger;
         private readonly IModelComplexityConfigProvider complexityProvider;
 
-        public SegmentationInferencePipeline(
-            ISegmentationModelFactory modelFactory,
-            ILogger<SegmentationInferencePipeline> logger,
-            IProjectOptionsService projectOptionsService,
-            IModelComplexityConfigProvider complexityProvider)
+        public SegmentationInferencePipeline(ISegmentationModelFactory modelFactory, ILogger<SegmentationInferencePipeline> logger, IModelComplexityConfigProvider complexityProvider)
         {
             this.modelFactory = modelFactory;
             this.logger = logger;
@@ -55,12 +52,15 @@ namespace AnnotationTool.Ai.Inference
                     ? SegmentationMode.Binary
                     : SegmentationMode.Multiclass;
 
-                var cfg = complexityProvider.GetConfig(
-                    project.Project.Settings.TrainModelSettings.ModelComplexity,
-                    project.Project.Settings.PreprocessingSettings.SliceSize,
-                    project.Project.Settings.PreprocessingSettings.SliceSize);
+                var preprocessing = project.Project.Settings.PreprocessingSettings;
+                var trainSettings = project.Project.Settings.TrainModelSettings;
 
-                using (var model = modelFactory.Create(project.Project, device, cfg).AsModule())
+                var cfg = complexityProvider.GetConfig(trainSettings.SegmentationArchitecture, trainSettings.ModelComplexity);
+
+                var inChannels = project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3;
+                var numClasses = project.Project.Features.Count;
+
+                using (var model = modelFactory.Create(inChannels, numClasses, cfg, device).AsModule())
                 {
                     model.load(modelPath).to(cfg.TrainPrecision, true).eval();
 
@@ -69,7 +69,7 @@ namespace AnnotationTool.Ai.Inference
                     {
                         var imgIndex = 0;
                         var total = project.Project.Images.Count;
-                        var numClasses = project.Project.Features.Count + 1; // background + features
+                        numClasses = project.Project.Features.Count + 1; // background + features
 
                         foreach (var img in project.Project.Images)
                         {
@@ -139,7 +139,7 @@ namespace AnnotationTool.Ai.Inference
 
                                 if (device.type == DeviceType.CUDA)
                                 {
-                                    NativeTorchCudaOps.EmptyCudaCache();
+                                    EmptyCudaCache();
                                 }
 
                                 if (ct.IsCancellationRequested)
@@ -156,7 +156,7 @@ namespace AnnotationTool.Ai.Inference
             {
                 if (device.type == DeviceType.CUDA)
                 {
-                    NativeTorchCudaOps.EmptyCudaCache();
+                    EmptyCudaCache();
                 }
             }
 
