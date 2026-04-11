@@ -155,7 +155,6 @@ namespace AnnotationTool.Ai.Training
             }
 
             var augmentations = ImageAugmentations.BuildAugmentations(settings.AugmentationSettings);
-
             var trainDataset = BuildTrainingDataset(project, trainPairs, augmentations, cfg);
 
             // Validation dataset is not augmented in any mode, but we still need to apply preprocessing (e.g. normalization)
@@ -184,12 +183,11 @@ namespace AnnotationTool.Ai.Training
 
         private SegmentationModelConfig BuildModelConfig(IProjectPresenter project)
         {
-            var preprocessing = project.Project.Settings.PreprocessingSettings;
+            var settings = project.Project.Settings;
+            var preprocessing = settings.PreprocessingSettings;
+            var trainSettings = settings.TrainModelSettings;
 
-            return complexityProvider.GetConfig(
-                project.Project.Settings.TrainModelSettings.ModelComplexity,
-                preprocessing.SliceSize,
-                preprocessing.SliceSize);
+            return complexityProvider.GetConfig(trainSettings.SegmentationArchitecture, trainSettings.ModelComplexity);
         }
 
         private SegmentationMode GetSegmentationMode(IProjectPresenter project)
