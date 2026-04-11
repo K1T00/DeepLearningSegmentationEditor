@@ -29,7 +29,7 @@
 
   <ItemGroup>
     <None Update="NativeTorchCudaOps.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 

@@ -76,8 +76,11 @@ namespace AnnotationTool.Ai.Training
 
                 var segmentationMode = GetSegmentationMode(project);
 
-                var model = modelFactory.Create(project.Project, device, cfg);
+                var inChannels = project.Project.Settings.PreprocessingSettings.TrainAsGreyscale ? 1 : 3;
+                var numClasses = project.Project.Features.Count;
 
+
+                var model = modelFactory.Create(inChannels, numClasses, cfg, device);
                 var optimization = TrainingOptimizationFactory.Build(model, project.Project.Settings, cfg, loaderInfo.BatchSize);
 
                 var ctx = new TrainingContext

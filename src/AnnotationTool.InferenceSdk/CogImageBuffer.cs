@@ -2,6 +2,7 @@
 
 namespace AnnotationTool.InferenceSdk
 {
+    //! For Cognex CogImage conversion !//
     public readonly struct CogImageBuffer
     {
         public readonly IntPtr Data;

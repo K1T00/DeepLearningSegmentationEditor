@@ -32,18 +32,17 @@ namespace AnnotationTool.Ai.Utils
             // Estimate activation memory per sample
             var activationElements = EstimateActivationElements(cfg, inputWidth, inputHeight, numChannels);
 
-            var backpropMultiplier = GetBackpropMultiplier(device, cfg.TrainPrecision, availableMemoryBytes);
+            var activationCalibration = GetActivationCalibration(cfg);
+            var backpropMultiplier = GetBackpropMultiplier(device, cfg, availableMemoryBytes);
 
-            var activationBytesPerSample = activationElements * bytesPerElement * backpropMultiplier;
+            var activationBytesPerSample = activationElements * activationCalibration * bytesPerElement * backpropMultiplier;
 
             // Estimate parameter + optimizer overhead
             var parameterBytes = EstimateParameterBytes(cfg, bytesPerElement);
-
             var optimizerBytes = EstimateOptimizerBytes(parameterBytes, optimizer);
 
             // Compute usable memory
             var utilization = ClampUtilization(targetUtilization, device, cfg.TrainPrecision, availableMemoryBytes);
-
             var usableBytes = availableMemoryBytes * utilization - optimizerBytes;
 
             double workspaceReserveBytes;
@@ -59,6 +58,11 @@ namespace AnnotationTool.Ai.Utils
                     workspaceReserveBytes = vramGB <= 8 ? 600e6 : 400e6;
                 else
                     workspaceReserveBytes = vramGB <= 8 ? 400e6 : 250e6;
+
+                if (cfg.Architecture == SegmentationArchitecture.UNetPlusPlus)
+                {
+                    workspaceReserveBytes *= 0.75;
+                }
             }
             else
             {
@@ -95,6 +99,13 @@ namespace AnnotationTool.Ai.Utils
 
         private static double EstimateActivationElements(SegmentationModelConfig cfg, int width, int height, int inChannels)
         {
+            return cfg.Architecture == SegmentationArchitecture.UNetPlusPlus
+                ? EstimateUnetPlusPlusActivationElements(cfg, width, height, inChannels)
+                : EstimateUnetActivationElements(cfg, width, height, inChannels);
+        }
+
+        private static double EstimateUnetActivationElements(SegmentationModelConfig cfg, int width, int height, int inChannels)
+        {
             var depth = cfg.Depth;
             var filters = cfg.FirstFilter;
 
@@ -103,43 +114,47 @@ namespace AnnotationTool.Ai.Utils
             var curH = height;
             var curC = inChannels;
 
-            // ---------- Encoder ----------
+            // Encoder
             for (var d = 0; d < depth; d++)
             {
                 var outC = filters << d;
 
-                // conv blocks
+                // double conv output/intermediate
                 sum += curW * curH * outC * 2;
 
-                // skip connection (stored)
+                // stored skip
                 sum += curW * curH * outC;
 
-                // attention (optional)
                 if (cfg.UseChannelAttention || cfg.UseSelfAttention)
                     sum += curW * curH * outC * 0.25;
 
-                // downsample
                 curW /= 2;
                 curH /= 2;
                 curC = outC;
             }
 
-            // ---------- Bottleneck ----------
+            // Bottleneck
             sum += curW * curH * curC * 2;
 
-            // ---------- Decoder ----------
+            if (cfg.UseSelfAttention)
+                sum += curW * curH * curC * 0.5;
+
+            // Decoder
             for (var d = depth - 1; d >= 0; d--)
             {
                 var outC = filters << d;
 
-                // upsample
+                // upsampled tensor
                 sum += curW * curH * curC;
 
-                // concat (discounted)
+                // concatenated tensor
                 sum += curW * curH * (curC + outC) * 0.65;
 
-                // conv blocks
+                // decoder double conv
                 sum += curW * curH * outC * 2;
+
+                if (cfg.UseAttentionGates)
+                    sum += curW * curH * outC * 0.35;
 
                 curW *= 2;
                 curH *= 2;
@@ -149,9 +164,81 @@ namespace AnnotationTool.Ai.Utils
             return sum;
         }
 
+        private static double EstimateUnetPlusPlusActivationElements(SegmentationModelConfig cfg, int width, int height, int inChannels)
+        {
+            var depth = cfg.Depth;
+            var filters = cfg.FirstFilter;
+
+            double sum = 0;
+
+            var widths = new int[depth + 1];
+            var heights = new int[depth + 1];
+            var channels = new int[depth + 1];
+
+            var curW = width;
+            var curH = height;
+            var curC = inChannels;
+
+            for (var i = 0; i <= depth; i++)
+            {
+                var outC = filters << i;
+
+                widths[i] = curW;
+                heights[i] = curH;
+                channels[i] = outC;
+
+                sum += curW * curH * outC * 2;
+                sum += curW * curH * outC * 0.6;
+
+                if (cfg.UseChannelAttention)
+                    sum += curW * curH * outC * 0.2;
+
+                if (i < depth)
+                {
+                    curW /= 2;
+                    curH /= 2;
+                    curC = outC;
+                }
+            }
+
+            if (cfg.UseSelfAttention)
+            {
+                sum += widths[depth] * heights[depth] * channels[depth] * 0.35;
+            }
+
+            for (var j = 1; j <= depth; j++)
+            {
+                for (var i = 0; i <= depth - j; i++)
+                {
+                    var w = widths[i];
+                    var h = heights[i];
+                    var outC = channels[i];
+                    var lowerC = channels[i + 1];
+
+                    sum += w * h * lowerC * 0.55;
+
+                    var concatChannels = (j + 1) * outC;
+                    sum += w * h * concatChannels * 0.45;
+
+                    sum += w * h * outC * 1.6;
+
+                    if (cfg.UseAttentionGates)
+                        sum += w * h * outC * 0.2;
+                }
+            }
+
+            return sum;
+        }
+
         private static double EstimateParameterBytes(SegmentationModelConfig cfg, double bytesPerElement)
         {
-            // Approximate UNet parameters
+            return cfg.Architecture == SegmentationArchitecture.UNetPlusPlus
+                ? EstimateUnetPlusPlusParameterBytes(cfg, bytesPerElement)
+                : EstimateUnetParameterBytes(cfg, bytesPerElement);
+        }
+
+        private static double EstimateUnetParameterBytes(SegmentationModelConfig cfg, double bytesPerElement)
+        {
             var depth = cfg.Depth;
             var filters = cfg.FirstFilter;
 
@@ -160,12 +247,11 @@ namespace AnnotationTool.Ai.Utils
 
             for (var d = 0; d < depth; d++)
             {
-                int outC = filters << d;
-                paramCount += 9 * inC * outC * 2; // convs
+                var outC = filters << d;
+                paramCount += 9 * inC * outC * 2;
                 inC = outC;
             }
 
-            // bottleneck
             paramCount += 9 * inC * inC * 2;
 
             for (var d = depth - 1; d >= 0; d--)
@@ -174,6 +260,41 @@ namespace AnnotationTool.Ai.Utils
                 paramCount += 9 * (inC + outC) * outC * 2;
                 inC = outC;
             }
+
+            return paramCount * bytesPerElement;
+        }
+
+        private static double EstimateUnetPlusPlusParameterBytes(SegmentationModelConfig cfg, double bytesPerElement)
+        {
+            var depth = cfg.Depth;
+            var filters = cfg.FirstFilter;
+
+            double paramCount = 0;
+            var encoderChannels = new int[depth + 1];
+            var inC = 1;
+
+            // Encoder X(i,0)
+            for (var i = 0; i <= depth; i++)
+            {
+                var outC = filters << i;
+                encoderChannels[i] = outC;
+
+                paramCount += 9 * inC * outC * 2;
+                inC = outC;
+            }
+
+            // Nested decoder X(i,j)
+            for (var i = 0; i < depth; i++)
+            {
+                var outC = encoderChannels[i];
+
+                for (var j = 1; j <= depth - i; j++)
+                {
+                    var decoderInChannels = (j + 1) * outC;
+                    paramCount += 9 * decoderInChannels * outC * 2;
+                }
+            }
+
             return paramCount * bytesPerElement;
         }
 
@@ -189,18 +310,38 @@ namespace AnnotationTool.Ai.Utils
             }
         }
 
-        private static double GetBackpropMultiplier(ComputeDevice device, ScalarType precision, long availableBytes)
+        private static double GetBackpropMultiplier(ComputeDevice device, SegmentationModelConfig cfg, long availableBytes)
         {
             if (device != ComputeDevice.Gpu)
                 return 2.2;
 
             var vramGB = availableBytes / (1024.0 * 1024 * 1024);
 
-            if (precision == ScalarType.Float16 || precision == ScalarType.BFloat16)
+            if (cfg.TrainPrecision == ScalarType.Float16 || cfg.TrainPrecision == ScalarType.BFloat16)
             {
                 return vramGB <= 8 ? 3.0 : 2.4;
             }
+
             return vramGB <= 8 ? 3.8 : 3.0;
+        }
+
+        private static double GetActivationCalibration(SegmentationModelConfig cfg)
+        {
+            if (cfg.Architecture != SegmentationArchitecture.UNetPlusPlus)
+                return 1.0;
+
+            double factor = 0.62;
+
+            if (cfg.UseAttentionGates)
+                factor *= 1.06;
+
+            if (cfg.UseSelfAttention)
+                factor *= 1.05;
+
+            if (cfg.UseChannelAttention)
+                factor *= 1.03;
+
+            return factor;
         }
 
         private static double GetBytesPerElement(ScalarType precision)

@@ -7,7 +7,7 @@ namespace AnnotationTool.Core.Models
     [TypeConverter(typeof(ExpandableObjectConverter))]
     public class TrainModelSettings : INotifyPropertyChanged
     {
-        private ModelComplexity modelComplexity = ModelComplexity.Medium;
+        private ModelComplexity modelComplexity = ModelComplexity.L2;
         private ComputeDevice device = ComputeDevice.Cpu;
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -37,6 +37,9 @@ namespace AnnotationTool.Core.Models
 
         [Browsable(false)]
         public string Error => null;
+
+        [Browsable(false)]
+        public SegmentationArchitecture SegmentationArchitecture { get; set; } = SegmentationArchitecture.UNet;
 
         protected void OnPropertyChanged(string name)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
