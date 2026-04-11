@@ -4,6 +4,41 @@ using static TorchSharp.torch;
 
 namespace AnnotationTool.Ai.Models
 {
+    ///						+--------------------------------------------------------------+
+    ///						|            Segmentation (UNet) Model Complexity              |
+    ///						+--------------------------------------------------------------+
+    ///
+    ///			LOW COMPLEXITY                       MEDIUM COMPLEXITY                     HIGH COMPLEXITY
+    ///		    ----------------                     -----------------                     ----------------
+    ///         Shallow UNet                         Standard UNet                         Deep UNet
+    ///         Depth = 2                            Depth = 3                             Depth = 4
+    ///         Filters: 32→64                       Filters: 64→128→256                   Filters: 96→192→384→768
+    ///
+    ///			DownSampling: MaxPool			  	 DownSampling: StridedConv		  	   DownSampling: StridedConv
+    ///			UpSampling: Interpolation		  	 UpSampling: Interpolation			   UpSampling: ConvTranspose2d
+    ///
+    ///			Attention: OFF					  	 Attention: Optional				   Attention: ON
+    ///			Dropout: OFF					  	 Dropout: OFF					       Dropout:  ON
+    ///
+    ///			Model Size: Small				  	 Model Size: Medium					   Model Size: Large
+    ///			Speed: Fast					         Speed: Moderate					   Speed: Slowest
+    ///			Detail: Basic					     Detail: Good					       Detail: Maximum
+    ///
+    ///           ┌─────────┐                       ┌─────────┐                            ┌─────────┐
+    ///  Input →  │ Encoder │ → Bottleneck →        │ Encoder │ → Bottleneck →             │ Encoder │ → Bottleneck →
+    ///           └─┬─────┬─┘                       └─┬─────┬─┘                            └─┬─────┬─┘
+    ///             ↓     ↓                           ↓     ↓                                ↓     ↓
+    ///            Max   Max                        Stride Stride                          Stride Stride
+    ///            Pool  Pool                       Conv   Conv                            Conv   Conv
+    ///             ↓     ↓                           ↓     ↓                                ↓     ↓
+    ///            Up    Up                           Up    Up                              Up     Up
+    ///          (Interpolation)                  (Interp or ConvT)                       (ConvTranspose2d)
+    ///               ↓                               ↓                                         ↓
+    ///             Output                          Output                                    Output
+    ///                                                                                
+    ///                
+    /// !!!!!!!!!!    Check ModelComplexityConfigFactory for currently deployed config values.    !!!!!!!!!! 
+    /// 
     public class ModelComplexityConfigProvider : IModelComplexityConfigProvider
     {
         /// <summary>
