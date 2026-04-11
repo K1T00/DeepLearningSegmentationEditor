@@ -49,18 +49,8 @@ namespace AnnotationTool.Ai.Geometry
         /// <summary>
         /// Creates a segmentation image space definition.
         /// </summary>
-        public SegmentationImageSpace(
-            Size originalImageSize,
-            Rect roi,
-            int sliceSize,
-            int downSample,
-            bool borderPadding)
+        public SegmentationImageSpace(Size originalImageSize, Rect roi, int sliceSize, int downSample, bool borderPadding)
         {
-            if (sliceSize <= 0)
-                throw new ArgumentOutOfRangeException(nameof(sliceSize));
-            if (downSample < 0)
-                throw new ArgumentOutOfRangeException(nameof(downSample));
-
             this.OriginalImageSize = originalImageSize;
             this.Roi = roi;
             this.SliceSize = sliceSize;
@@ -71,8 +61,8 @@ namespace AnnotationTool.Ai.Geometry
             this.SliceSizeInOriginalSpace = sliceSize << downSample;
 
             // Ensure ROI is at least one slice large
-            int roiWidth = Math.Max(roi.Width, SliceSizeInOriginalSpace);
-            int roiHeight = Math.Max(roi.Height, SliceSizeInOriginalSpace);
+            var roiWidth = Math.Max(roi.Width, SliceSizeInOriginalSpace);
+            var roiHeight = Math.Max(roi.Height, SliceSizeInOriginalSpace);
 
             this.RoiSize = new Size(roiWidth, roiHeight);
 
@@ -90,12 +80,7 @@ namespace AnnotationTool.Ai.Geometry
         /// Computes the tile grid dimensions for a given working size.
         /// This logic MUST be shared by training and inference.
         /// </summary>
-        private static void ComputeTileGrid(
-            Size workingSize,
-            int sliceSize,
-            bool borderPadding,
-            out int rows,
-            out int cols)
+        private static void ComputeTileGrid(Size workingSize, int sliceSize, bool borderPadding, out int rows, out int cols)
         {
             if (borderPadding)
             {
@@ -115,19 +100,15 @@ namespace AnnotationTool.Ai.Geometry
         /// <summary>
         /// Reconstructs a model-space prediction into full original image space.
         /// This method performs ALL reverse geometry steps:
-        /// upsample → pad → paste ROI.
+        /// UpSample → pad → paste ROI.
         /// </summary>
         public Mat ReconstructToOriginal(Mat modelPrediction)
         {
-            using (var roiUpsampled = UpSampleImage(modelPrediction, DownSample))
+            using (var roiUpSampled = UpSampleImage(modelPrediction, DownSample))
             {
-                var fullSizeImg = new Mat(
-                    OriginalImageSize.Height,
-                    OriginalImageSize.Width,
-                    roiUpsampled.Type(),
-                    Scalar.Black);
+                var fullSizeImg = new Mat(OriginalImageSize.Height, OriginalImageSize.Width, roiUpSampled.Type(), Scalar.Black);
 
-                CopyMatWithClipping(roiUpsampled, fullSizeImg, Roi.X, Roi.Y);
+                CopyMatWithClipping(roiUpSampled, fullSizeImg, Roi.X, Roi.Y);
 
                 return fullSizeImg;
             }
@@ -151,22 +132,19 @@ namespace AnnotationTool.Ai.Geometry
             return new Mat(original, Roi);
         }
 
-        public Mat UpsampleToRoi(Mat modelPrediction)
+        public Mat UpSampleToRoi(Mat modelPrediction)
         {
             return UpSampleImage(modelPrediction, DownSample);
         }
 
         public Mat PadToRoi(Mat roiPrediction)
         {
-            var roiMap = new Mat(
-                Roi.Height,
-                Roi.Width,
-                roiPrediction.Type(),
-                Scalar.Black);
+            var roiMap = new Mat(Roi.Height, Roi.Width, roiPrediction.Type(), Scalar.Black);
 
             roiPrediction.CopyTo(
                 roiMap[new Rect(
-                    0, 0,
+                    0,
+                    0,
                     Math.Min(roiPrediction.Width, roiMap.Width),
                     Math.Min(roiPrediction.Height, roiMap.Height))]);
 

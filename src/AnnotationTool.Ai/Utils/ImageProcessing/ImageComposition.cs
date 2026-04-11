@@ -9,7 +9,7 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
         // Images need to be sorted !!!
         public static Mat MergeImages(Mat[] images, int nRowImages, int nColumnImages)
         {
-            int expected = nRowImages * nColumnImages;
+            var expected = nRowImages * nColumnImages;
             if (images.Length != expected)
                 throw new ArgumentException("Amount of images does not match grid size.");
 
@@ -18,21 +18,21 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
             var h = images[0].Rows;
             var type = images[0].Type();
 
-            for (int k = 1; k < images.Length; k++)
+            for (var k = 1; k < images.Length; k++)
             {
                 if (images[k].Cols != w || images[k].Rows != h || images[k].Type() != type)
                     throw new ArgumentException("All images must have the same dimensions and type.");
             }
 
             // Build rows and concatenate horizontally
-            Mat[] rows = new Mat[nRowImages];
-            int index = 0;
+            var rows = new Mat[nRowImages];
+            var index = 0;
 
-            for (int r = 0; r < nRowImages; r++)
+            for (var r = 0; r < nRowImages; r++)
             {
-                Mat[] rowImgs = new Mat[nColumnImages];
+                var rowImgs = new Mat[nColumnImages];
 
-                for (int c = 0; c < nColumnImages; c++)
+                for (var c = 0; c < nColumnImages; c++)
                 {
                     rowImgs[c] = images[index];
                     index++;
@@ -43,7 +43,7 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
             }
 
             // Concatenate vertically to form final grid
-            Mat result = new Mat();
+            var result = new Mat();
             Cv2.VConcat(rows, result);
 
             return result;

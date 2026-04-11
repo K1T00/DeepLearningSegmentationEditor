@@ -8,7 +8,7 @@ namespace AnnotationTool.Ai.Utils
 {
 
     /// <summary>
-    /// Workarount to concatenate multiple SegmentationDataset instances into one.
+    /// Workaround to concatenate multiple SegmentationDataset instances into one.
     /// 
     /// PR: https://github.com/dotnet/TorchSharp/pull/1411
     /// </summary>
@@ -40,11 +40,11 @@ namespace AnnotationTool.Ai.Utils
 
         public override Dictionary<string, Tensor> GetTensor(long index)
         {
-            for (int i = 0; i < datasets.Count; i++)
+            for (var i = 0; i < datasets.Count; i++)
             {
                 if (index < cumulativeSizes[i])
                 {
-                    long localIndex = i == 0 ? index : index - cumulativeSizes[i - 1];
+                    var localIndex = i == 0 ? index : index - cumulativeSizes[i - 1];
                     return datasets[i].GetTensor(localIndex);
                 }
             }

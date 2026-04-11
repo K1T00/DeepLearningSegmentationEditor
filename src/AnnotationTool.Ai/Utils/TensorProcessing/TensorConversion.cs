@@ -14,46 +14,46 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
             if (image.Type() != MatType.CV_8UC3)
                 throw new ArgumentException("Expected CV_8UC3 Mat");
 
-            int h = image.Rows;
-            int w = image.Cols;
-            int count = h * w;
+            var h = image.Rows;
+            var w = image.Cols;
+            var count = h * w;
 
-            float meanR = norm.Mean[0];
-            float meanG = norm.Mean[1];
-            float meanB = norm.Mean[2];
+            var meanR = norm.Mean[0];
+            var meanG = norm.Mean[1];
+            var meanB = norm.Mean[2];
 
-            float invStdR = 1f / norm.Std[0];
-            float invStdG = 1f / norm.Std[1];
-            float invStdB = 1f / norm.Std[2];
+            var invStdR = 1f / norm.Std[0];
+            var invStdG = 1f / norm.Std[1];
+            var invStdB = 1f / norm.Std[2];
 
-            float inv255 = 1f / 255f;
+            var inv255 = 1f / 255f;
 
             // Allocate managed buffer: [R | G | B] planes
-            float[] buffer = new float[count * 3];
+            var buffer = new float[count * 3];
 
-            byte* srcBase = (byte*)image.DataPointer;
+            var srcBase = image.DataPointer;
 
             // Use OpenCV row stride
-            int stride = (int)image.Step();
+            var stride = (int)image.Step();
 
             fixed (float* dst = buffer)
             {
-                float* rPtr = dst;
-                float* gPtr = dst + count;
-                float* bPtr = dst + count * 2;
+                var rPtr = dst;
+                var gPtr = dst + count;
+                var bPtr = dst + count * 2;
 
-                for (int y = 0; y < h; y++)
+                for (var y = 0; y < h; y++)
                 {
-                    byte* row = srcBase + y * stride;
+                    var row = srcBase + y * stride;
 
-                    for (int x = 0; x < w; x++)
+                    for (var x = 0; x < w; x++)
                     {
-                        int i = x * 3;
+                        var i = x * 3;
 
                         // OpenCV is BGR
-                        float vb = row[i] * inv255;
-                        float vg = row[i + 1] * inv255;
-                        float vr = row[i + 2] * inv255;
+                        var vb = row[i] * inv255;
+                        var vg = row[i + 1] * inv255;
+                        var vr = row[i + 2] * inv255;
 
                         *rPtr++ = (vr - meanR) * invStdR;
                         *gPtr++ = (vg - meanG) * invStdG;
@@ -71,35 +71,35 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
 
         public static unsafe Tensor GreyMatToNormalizedTensor(Mat image, Device device, ScalarType precision, NormalizationSettings norm)
         {
-            int h = image.Rows;
-            int w = image.Cols;
-            int count = w * h;
+            var h = image.Rows;
+            var w = image.Cols;
+            var count = w * h;
 
-            float[] buffer = new float[count];
+            var buffer = new float[count];
 
             const float inv255 = 1f / 255f;
 
-            float mean = norm.Mean[0];
-            float invStd = 1f / norm.Std[0];
+            var mean = norm.Mean[0];
+            var invStd = 1f / norm.Std[0];
 
-            byte* src = (byte*)image.DataPointer;
+            var src = (byte*)image.DataPointer;
 
             fixed (float* dst = buffer)
             {
-                float* gPtr = dst;
+                var gPtr = dst;
 
                 // For CV_8UC1, stride == w in most cases,
                 // but Step() is ALWAYS correct and handles alignment.
 
-                int stride = (int)image.Step();
+                var stride = (int)image.Step();
 
-                for (int y = 0; y < h; y++)
+                for (var y = 0; y < h; y++)
                 {
-                    byte* row = src + y * stride;
+                    var row = src + y * stride;
 
-                    for (int x = 0; x < w; x++)
+                    for (var x = 0; x < w; x++)
                     {
-                        float v = row[x] * inv255;
+                        var v = row[x] * inv255;
                         *gPtr++ = (v - mean) * invStd;
                     }
                 }
@@ -117,26 +117,26 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
             if (img.Type() != MatType.CV_8UC1)
                 throw new ArgumentException("Mask must be CV_8UC1 (single channel 8-bit)");
 
-            int h = img.Rows;
-            int w = img.Cols;
-            int count = h * w;
+            var h = img.Rows;
+            var w = img.Cols;
+            var count = h * w;
 
-            float[] buffer = new float[count];
+            var buffer = new float[count];
 
             // Raw pointer to grayscale mask (1 byte per pixel)
-            byte* src = (byte*)img.DataPointer;
+            var src = (byte*)img.DataPointer;
 
             fixed (float* dst = buffer)
             {
-                float* pDst = dst;
+                var pDst = dst;
 
-                int stride = (int)img.Step();  // Safe to cast for typical image sizes
+                var stride = (int)img.Step();  // Safe to cast for typical image sizes
 
-                for (int y = 0; y < h; y++)
+                for (var y = 0; y < h; y++)
                 {
-                    byte* row = src + y * stride;
+                    var row = src + y * stride;
 
-                    for (int x = 0; x < w; x++)
+                    for (var x = 0; x < w; x++)
                     {
                         // Convert {0,1} → {0f,1f}
                         *pDst++ = row[x] > 0 ? 1f : 0f;
@@ -156,24 +156,24 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
             if (img.Type() != MatType.CV_8UC1)
                 throw new ArgumentException("Mask must be CV_8UC1 (single channel 8-bit)");
 
-            int h = img.Rows;
-            int w = img.Cols;
-            int count = h * w;
+            var h = img.Rows;
+            var w = img.Cols;
+            var count = h * w;
 
-            long[] buffer = new long[count];
+            var buffer = new long[count];
 
             // Raw pointer to grayscale mask (1 byte per pixel)
-            byte* src = (byte*)img.DataPointer;
+            var src = (byte*)img.DataPointer;
 
             fixed (long* dst = buffer)
             {
-                long* pDst = dst;
+                var pDst = dst;
 
-                int stride = (int)img.Step();  // Safe to cast for typical image sizes
+                var stride = (int)img.Step();  // Safe to cast for typical image sizes
 
-                for (int y = 0; y < h; y++)
+                for (var y = 0; y < h; y++)
                 {
-                    byte* row = src + y * stride;
+                    var row = src + y * stride;
 
                     for (int x = 0; x < w; x++)
                     {
@@ -197,18 +197,18 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
 
             using (var scope = NewDisposeScope())
             {
-                long A = tens.shape[0];
-                long B = tens.shape[1];
+                var A = tens.shape[0];
+                var B = tens.shape[1];
 
-                Tensor[][] result = new Tensor[A][];
+                var result = new Tensor[A][];
 
-                for (int a = 0; a < A; a++)
+                for (var a = 0; a < A; a++)
                 {
                     result[a] = new Tensor[B];
 
-                    Tensor sliceA = tens[a]; // [B, H, W]
+                    var sliceA = tens[a]; // [B, H, W]
 
-                    for (int b = 0; b < B; b++)
+                    for (var b = 0; b < B; b++)
                     {
                         result[a][b] = sliceA[b].contiguous().MoveToOuterDisposeScope(); // [H, W]
                     }
@@ -225,9 +225,9 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
                 var N = images.Length;
 
                 // No parallel tasks needed here.
-                Tensor[] outputs = new Tensor[N];
+                var outputs = new Tensor[N];
 
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
                     if (trainImagesAsGreyscale)
                     {
@@ -249,10 +249,10 @@ namespace AnnotationTool.Ai.Utils.TensorProcessing
         // Result prediction tensor is always of type grey and needs to be converted back to an image
         public static Mat[] SlicedImageTensorToImage(Tensor[][] slicedImageTensor)
         {
-            int N = slicedImageTensor.Length;
-            Mat[] results = new Mat[N];
+            var N = slicedImageTensor.Length;
+            var results = new Mat[N];
 
-            for (int i = 0; i < N; i++)
+            for (var i = 0; i < N; i++)
             {
                 // pred[i][0] is a [H x W] tensor for the mask
                 results[i] = TensorToGreyImage(slicedImageTensor[i][0]);

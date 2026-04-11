@@ -8,7 +8,7 @@ namespace AnnotationTool.Ai.Processing
     /// <summary>
     /// Executes the forward segmentation preprocessing pipeline:
     ///
-    /// original → ROI → downsample → slice
+    /// original → ROI → DownSample → slice
     ///
     /// Symmetry with SegmentationPostprocessor.
     /// </summary>
