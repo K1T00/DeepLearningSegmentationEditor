@@ -5,8 +5,6 @@ using System.Drawing.Imaging;
 
 namespace AnnotationTool.Core.Models
 {
-
-
     /// <summary>
     /// Holds all runtime buffers for a single image.
     /// Owns all bitmaps stored inside (FullImage, Annotation, Heatmap).
@@ -29,28 +27,50 @@ namespace AnnotationTool.Core.Models
         private readonly object maskLock = new object();
         private readonly object heatmapLock = new object();
         private readonly object heatmapDataLock = new object();
+
+        private bool annotationLoadedOnce;
+        private bool maskLoadedOnce;
         private bool disposed;
 
         public ImageRuntime()
         {
         }
 
+        public bool AnnotationLoadedOnce
+        {
+            get
+            {
+                EnsureNotDisposed();
+                lock (annotationLock)
+                    return annotationLoadedOnce;
+            }
+        }
+
+        public bool MaskLoadedOnce
+        {
+            get
+            {
+                EnsureNotDisposed();
+                lock (maskLock)
+                    return maskLoadedOnce;
+            }
+        }
+
+        /// <summary>
+        /// Dirty flags indicate in-memory edits that have not yet been persisted (saved).
+        /// </summary>
+        public bool IsAnnotationDirty { get; private set; }
+
+        /// <summary>
+        /// Dirty flags indicate in-memory edits that have not yet been persisted (saved).
+        /// </summary>
+        public bool IsMaskDirty { get; private set; }
+
         /// <summary>
         /// Threshold used for generating heatmaps from raw certainty. Range 0..255.
         /// </summary>
         public int HeatmapThresholdByte { get; private set; } = 0;
 
-        /// <summary>
-        /// True if annotation has been loaded/created at least once for this runtime.
-        /// </summary>
-        public bool AnnotationLoadedOnce { get; set; } = false;
-
-        /// <summary>
-        /// Dirty flags indicate in-memory edits that have not yet been persisted.
-        /// </summary>
-        public bool IsAnnotationDirty { get; private set; }
-
-        public bool IsMaskDirty { get; private set; }
 
         public Bitmap FullImage
         {
@@ -224,9 +244,25 @@ namespace AnnotationTool.Core.Models
             }
         }
 
-        // -----------------------------
-        // Ensure buffers exist
-        // -----------------------------
+        public void MarkAnnotationLoaded()
+        {
+            EnsureNotDisposed();
+
+            lock (annotationLock)
+            {
+                annotationLoadedOnce = true;
+            }
+        }
+
+        public void MarkMaskLoaded()
+        {
+            EnsureNotDisposed();
+
+            lock (maskLock)
+            {
+                maskLoadedOnce = true;
+            }
+        }
 
         public void EnsureAnnotation(int width, int height)
         {
@@ -343,7 +379,7 @@ namespace AnnotationTool.Core.Models
             if (string.IsNullOrWhiteSpace(featureKey)) return;
 
             HeatmapRaw raw;
-            int thr = HeatmapThresholdByte;
+            var thr = HeatmapThresholdByte;
 
             lock (heatmapDataLock)
             {
@@ -368,24 +404,24 @@ namespace AnnotationTool.Core.Models
 
             try
             {
-                byte* dst0 = (byte*)data.Scan0;
-                int stride = data.Stride;
+                var dst0 = (byte*)data.Scan0;
+                var stride = data.Stride;
 
                 var src = raw.Data; // 0..255
-                int w = raw.Width;
-                int h = raw.Height;
+                var w = raw.Width;
+                var h = raw.Height;
 
                 fixed (byte* src0 = src)
                 {
-                    byte* s = src0;
-                    for (int y = 0; y < h; y++)
+                    var s = src0;
+                    for (var y = 0; y < h; y++)
                     {
-                        byte* row = dst0 + y * stride;
-                        int baseIdx = y * w;
+                        var row = dst0 + y * stride;
+                        var baseIdx = y * w;
 
-                        for (int x = 0; x < w; x++)
+                        for (var x = 0; x < w; x++)
                         {
-                            byte v = s[baseIdx + x];
+                            var v = s[baseIdx + x];
 
                             if (v < thresholdByte)
                             {
@@ -416,12 +452,11 @@ namespace AnnotationTool.Core.Models
 
         private static void TurboColor(byte value, out byte r, out byte g, out byte b)
         {
-            // Polynomial approximation of Turbo colormap (by Google)
-            // Source coefficients are widely used (e.g. matplotlib's turbo).
-            float x = value / 255f;
+            // Polynomial approximation of Turbo
+            var x = value / 255f;
 
             // Coefficients for r,g,b (6 terms each)
-            float rr =
+            var rr =
                 0.13572138f +
                 x * (4.61539260f +
                 x * (-42.66032258f +
@@ -429,7 +464,7 @@ namespace AnnotationTool.Core.Models
                 x * (-152.94239396f +
                 x * 59.28637943f))));
 
-            float gg =
+            var gg =
                 0.09140261f +
                 x * (2.19418839f +
                 x * (4.84296658f +
@@ -437,7 +472,7 @@ namespace AnnotationTool.Core.Models
                 x * (4.27729857f +
                 x * 2.82956604f))));
 
-            float bb =
+            var bb =
                 0.10667330f +
                 x * (12.64194608f +
                 x * (-60.58204836f +

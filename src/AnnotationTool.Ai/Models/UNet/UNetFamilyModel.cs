@@ -23,6 +23,7 @@ namespace AnnotationTool.Ai.Models.UNet
         private readonly Module<Tensor, Tensor> bottleneckLayer;
         private readonly Module<Tensor, Tensor> selfAttention;
         private readonly ModuleList<Module<Tensor, Tensor>> upConvolutionLayers = new ModuleList<Module<Tensor, Tensor>>();
+        private readonly ModuleList<Module<Tensor, Tensor>> upProjectionLayers = new ModuleList<Module<Tensor, Tensor>>();
         private readonly ModuleList<Module<Tensor, Tensor>> decoderLayers = new ModuleList<Module<Tensor, Tensor>>();
         private readonly ModuleList<Module<(Tensor, Tensor), Tensor>> attentionGates = new ModuleList<Module<(Tensor, Tensor), Tensor>>();
         private readonly Module<Tensor, Tensor> outLayer;
@@ -81,6 +82,12 @@ namespace AnnotationTool.Ai.Models.UNet
                         cfg.UseInterpolationUp,
                         device,
                         cfg.TrainPrecision));
+
+                upProjectionLayers.Add(
+
+                    cfg.UseInterpolationUp
+                    ? Sequential((string.Format("UpProjectionLayer{0}", nLayer), Conv2d(inC, filterSizes[nLayer], 1, device: device, dtype: cfg.TrainPrecision)))
+                    : Sequential((string.Format("UpProjectionLayer{0}_identity", nLayer), Identity())));
 
                 decoderLayers.Add(
                     BuildConvBlock(
@@ -178,6 +185,8 @@ namespace AnnotationTool.Ai.Models.UNet
                     var upSampled = cfg.UseInterpolationUp
                         ? interpolate(x, scale_factor: new double[] { 2.0, 2.0 }, mode: InterpolationMode.Bilinear, align_corners: false)
                         : upConvolutionLayers[i].call(x);
+
+                    upSampled = upProjectionLayers[i].call(upSampled);
 
                     if (upSampled.shape[2] != skip.shape[2] || upSampled.shape[3] != skip.shape[3])
                     {

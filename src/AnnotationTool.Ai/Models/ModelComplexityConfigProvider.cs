@@ -187,6 +187,25 @@ namespace AnnotationTool.Ai.Models
                     cfg.UseSelfAttention = false;
                     break;
 
+                case ModelComplexity.L5:
+                    cfg.Architecture = SegmentationArchitecture.UNetPlusPlus;
+                    cfg.Depth = 4;
+                    cfg.FirstFilter = 96;
+
+                    cfg.UsePooling = true;
+                    cfg.UseStridedConv = false;
+                    cfg.UseInterpolationDown = false;
+                    cfg.UseInterpolationUp = false;
+
+                    cfg.UseInstanceNorm = true;
+                    cfg.UseDropout = true;
+
+                    cfg.UseResidualBlocks = true;
+                    cfg.UseChannelAttention = true;
+                    cfg.UseAttentionGates = true;
+                    cfg.UseSelfAttention = true;
+                    break;
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(complexity), complexity, "Model complexity must be between 0 and 5.");
             }
@@ -283,6 +302,25 @@ namespace AnnotationTool.Ai.Models
                     cfg.UseChannelAttention = true;
                     cfg.UseAttentionGates = true;
                     cfg.UseSelfAttention = false;
+                    break;
+
+                case ModelComplexity.L5:
+                    cfg.Architecture = SegmentationArchitecture.UNetPlusPlus;
+                    cfg.Depth = 4;
+                    cfg.FirstFilter = 96;
+
+                    cfg.UsePooling = true;
+                    cfg.UseStridedConv = false;
+                    cfg.UseInterpolationDown = false;
+                    cfg.UseInterpolationUp = false;
+
+                    cfg.UseInstanceNorm = true;
+                    cfg.UseDropout = true;
+
+                    cfg.UseResidualBlocks = true;
+                    cfg.UseChannelAttention = true;
+                    cfg.UseAttentionGates = true;
+                    cfg.UseSelfAttention = true;
                     break;
 
                 default:
