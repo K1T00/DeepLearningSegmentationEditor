@@ -23,29 +23,34 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
             // If no padding needed, return simple sub-ROI
             if (padLeft == 0 && padTop == 0 && padRight == 0 && padBottom == 0)
             {
-                return input.SubMat(y1, y1 + roiHeight, x1, x1 + roiWidth);
+                using (var roi = input.SubMat(y1, y1 + roiHeight, x1, x1 + roiWidth))
+                {
+                    return roi.Clone();
+                }
             }
 
             // Create padded image
-            var padded = new Mat();
-            Cv2.CopyMakeBorder(
-                input,
-                padded,
-                padTop,
-                padBottom,
-                padLeft,
-                padRight,
-                BorderTypes.Constant,
-                paddingColor);
+            using (var padded = new Mat())
+            {
+                Cv2.CopyMakeBorder(
+                    input,
+                    padded,
+                    padTop,
+                    padBottom,
+                    padLeft,
+                    padRight,
+                    BorderTypes.Constant,
+                    paddingColor);
 
-            // Adjust ROI coordinates relative to padded image
-            var newX1 = x1 + padLeft;
-            var newY1 = y1 + padTop;
+                // Adjust ROI coordinates relative to padded image
+                var newX1 = x1 + padLeft;
+                var newY1 = y1 + padTop;
 
-            var roi = padded.SubMat(newY1, newY1 + roiHeight, newX1, newX1 + roiWidth);
-
-            padded.Dispose();
-            return roi;
+                using (var roi = padded.SubMat(newY1, newY1 + roiHeight, newX1, newX1 + roiWidth))
+                {
+                    return roi.Clone();
+                }
+            }
         }
 
         // ToDo: Test alternative implementation
@@ -145,7 +150,6 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
         public static Mat[] SliceImage(Mat image, int roiSize, bool withBorderPadding, int nImagesRow, int nImagesColumn)
         {
             var result = new Mat[nImagesRow * nImagesColumn];
-
             var index = 0;
 
             for (var py = 0; py < nImagesRow; py++)
@@ -158,7 +162,10 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
 
                     if (withBorderPadding)
                     {
-                        result[index] = GetPaddedRoi(image, x, y, roiSize, roiSize, Scalar.Black);
+                        using (var tile = GetPaddedRoi(image, x, y, roiSize, roiSize, Scalar.Black))
+                        {
+                            result[index] = tile.Clone();
+                        }
                     }
                     else
                     {
@@ -169,8 +176,10 @@ namespace AnnotationTool.Ai.Utils.ImageProcessing
                         var w = x2 - x;
                         var h = y2 - y;
 
-                        //result[index] = image.SubMat(y, y + h, x, x + w);
-                        result[index] = image.SubMat(y, y + h, x, x + w).Clone();
+                        using (var tile = image.SubMat(y, y + h, x, x + w))
+                        {
+                            result[index] = tile.Clone();
+                        }
                     }
 
                     index++;

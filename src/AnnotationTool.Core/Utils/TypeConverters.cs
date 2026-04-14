@@ -8,7 +8,7 @@ namespace AnnotationTool.Core.Utils
 {
     public class SliceSizeConverter : Int32Converter
     {
-        private static readonly int[] allowed = new[] { 48, 96, 144, 192, 240 };
+        private static readonly int[] allowed = new[] { 48, 64, 96, 128, 160, 192, 224, 256 };
 
         public override bool GetStandardValuesSupported(ITypeDescriptorContext context) => true;
 

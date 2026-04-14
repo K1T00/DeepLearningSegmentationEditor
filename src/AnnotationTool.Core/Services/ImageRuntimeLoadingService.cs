@@ -81,39 +81,55 @@ namespace AnnotationTool.Core.Services
                     return;
 
                 var rt = imagesRepo.GetRuntime(item);
-                if (rt.AnnotationLoadedOnce)
-                    return;
-
                 var paths = projectPresenter.Paths;
+
                 var annPng = Path.Combine(paths.Annotations, item.Guid + paths.ImagesExt);
                 var maskPng = Path.Combine(paths.Masks, item.Guid + paths.ImagesExt);
 
-                if (File.Exists(annPng))
-                {
-                    using (var fs = File.OpenRead(annPng))
-                    using (var tmp = Image.FromStream(fs))
-                    {
-                        rt.MutateAnnotation(bmp =>
-                        {
-                            using (var g = Graphics.FromImage(bmp))
-                            {
-                                g.DrawImageUnscaled(tmp, 0, 0);
-                            }
-                        });
-
-                        rt.MarkAnnotationClean();
-                    }
-                }
-
-                LabelMask lm;
-                if (File.Exists(maskPng) && TryLoadPng8(maskPng, out lm))
-                {
-                    rt.MutateMask(m => m.CopyFrom(lm));
-                    rt.MarkMaskClean();
-                }
-
-                rt.AnnotationLoadedOnce = true;
+                EnsureAnnotationLoaded(rt, annPng);
+                EnsureMaskLoaded(rt, maskPng);
             });
+        }
+
+
+        private static void EnsureAnnotationLoaded(ImageRuntime rt, string annPng)
+        {
+            if (rt.AnnotationLoadedOnce)
+                return;
+
+            if (File.Exists(annPng))
+            {
+                using (var fs = File.OpenRead(annPng))
+                using (var tmp = Image.FromStream(fs))
+                {
+                    rt.MutateAnnotation(bmp =>
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                        {
+                            g.DrawImageUnscaled(tmp, 0, 0);
+                        }
+                    });
+
+                    rt.MarkAnnotationClean();
+                }
+            }
+
+            rt.MarkAnnotationLoaded();
+        }
+
+        private static void EnsureMaskLoaded(ImageRuntime rt, string maskPng)
+        {
+            if (rt.MaskLoadedOnce)
+                return;
+
+            LabelMask lm;
+            if (File.Exists(maskPng) && TryLoadPng8(maskPng, out lm))
+            {
+                rt.MutateMask(m => m.CopyFrom(lm));
+                rt.MarkMaskClean();
+            }
+
+            rt.MarkMaskLoaded();
         }
 
         public Task EnsureHeatmapLoadedAsync(ImageItem item, ImageRepository imagesRepo, IProjectPresenter projectPresenter, string featureName, int thresholdPercent)
@@ -165,6 +181,6 @@ namespace AnnotationTool.Core.Services
             });
         }
 
- 
+
     }
 }

@@ -298,7 +298,7 @@ namespace AnnotationTool.App
                 switch (currentPipelineLoopState)
                 {
                     case PipelineLoopState.Annotation:
-                        if (!rt.AnnotationLoadedOnce)
+                        if (!rt.AnnotationLoadedOnce || !rt.MaskLoadedOnce)
                         {
                             await imageRuntimeLoader.EnsureAnnotationAndMaskLoadedAsync(item, imagesRepo, projectPresenter);
                         }
@@ -1145,6 +1145,7 @@ namespace AnnotationTool.App
 
                         brushController.BeginStroke(e.Location, viewport, annotationToolsControl.BrushSize, (byte)currentSelectedFeature.ClassId);
 
+
                         if (brushController.UpdateStroke(e.Location, viewport, rt.Mask, out var dirtyImageRect))
                         {
                             rt.MutateAnnotation(bmp =>
@@ -1156,6 +1157,14 @@ namespace AnnotationTool.App
                                     dirtyImageRect,
                                     overlayAlpha);
                             });
+
+
+                            rt.MutateMask(mask =>
+                            {
+                                var changed = brushController.UpdateStroke(e.Location, viewport, mask, out dirtyImageRect);
+                            });
+
+
 
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
                             mainPictureBox.Invalidate(new Region(dirtyScreenRect));
@@ -1176,6 +1185,11 @@ namespace AnnotationTool.App
                                     currentFeatureColorMap,
                                     dirtyImageRect,
                                     overlayAlpha);
+                            });
+
+                            rt.MutateMask(mask =>
+                            {
+                                var changed = brushController.UpdateStroke(e.Location, viewport, mask, out dirtyImageRect);
                             });
 
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
@@ -1240,6 +1254,12 @@ namespace AnnotationTool.App
                                     overlayAlpha);
                             });
 
+
+                            rt.MutateMask(mask =>
+                            {
+                                var changed = brushController.UpdateStroke(e.Location, viewport, mask, out dirtyImageRect);
+                            });
+
                             var dirtyScreenRect = viewport.ImageToScreenRect(dirtyImageRect);
                             mainPictureBox.Invalidate(new Region(dirtyScreenRect));
                         }
@@ -1287,7 +1307,7 @@ namespace AnnotationTool.App
                 {
                     if (!projectPresenter.TryGetImageItem(currentSelectedImageGuid, out var it))
                         return;
-                    it?.Roi = roiController.GetRoundedRoi();
+                    it.Roi = roiController.GetRoundedRoi();
                 }
             }
 

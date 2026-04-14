@@ -8,7 +8,7 @@ namespace AnnotationTool.Ai.Processing
     /// <summary>
     /// Executes the forward segmentation preprocessing pipeline:
     ///
-    /// original → ROI → DownSample → slice
+    /// Original → ROI → DownSample → slice
     ///
     /// Symmetry with SegmentationPostprocessor.
     /// </summary>
@@ -29,7 +29,16 @@ namespace AnnotationTool.Ai.Processing
             using (var roi = space.ExtractRoi(original))
             using (var down = DownSampleImage(roi, space.DownSample))
             {
-                return SliceImage(down, space.SliceSize, space.BorderPadding, space.TileRows, space.TileCols);
+                var tiles = SliceImage(down, space.SliceSize, space.BorderPadding, space.TileRows, space.TileCols);
+
+                for (var i = 0; i < tiles.Length; i++)
+                {
+                    var owned = tiles[i].Clone();
+                    tiles[i].Dispose();
+                    tiles[i] = owned;
+                }
+
+                return tiles;
             }
         }
     }

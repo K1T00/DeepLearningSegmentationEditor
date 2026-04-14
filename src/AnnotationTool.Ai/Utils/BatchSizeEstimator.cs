@@ -330,7 +330,7 @@ namespace AnnotationTool.Ai.Utils
             if (cfg.Architecture != SegmentationArchitecture.UNetPlusPlus)
                 return 1.0;
 
-            double factor = 0.62;
+            double factor = 0.68;
 
             if (cfg.UseAttentionGates)
                 factor *= 1.06;
